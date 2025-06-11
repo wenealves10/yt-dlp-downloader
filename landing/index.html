@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="pt-BR" class="scroll-smooth">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YT Downloader - Baixe, Resuma e Compartilhe Vídeos com IA</title>
+    <meta name="description"
+        content="Transforme vídeos do YouTube em qualquer formato, extraia insights com resumos de IA e gere posts para redes sociais com um clique. Acelere seu fluxo de trabalho com conteúdo.">
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Google Fonts: Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap"
+        rel="stylesheet">
+
+    <!-- Alpine.js for interactivity -->
+    <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #111827;
+            /* gray-900 */
+            color: #d1d5db;
+            /* gray-300 */
+        }
+
+        .gradient-text {
+            background-image: linear-gradient(to right, #ef4444, #f87171);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+        }
+
+        .glass-effect {
+            background: rgba(31, 41, 55, 0.5);
+            /* gray-800 com 50% de opacidade */
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border: 1px solid rgba(55, 65, 81, 0.3);
+            /* gray-700 com 30% de opacidade */
+        }
+    </style>
+</head>
+
+<body class="antialiased">
+
+    <!-- Header -->
+    <header class="fixed top-0 left-0 right-0 z-40 glass-effect">
+        <div class="container mx-auto px-6 py-4 flex justify-between items-center">
+            <div class="flex items-center gap-2">
+                <svg class="h-8 w-8 text-red-500" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
+                    fill="currentColor">
+                    <path
+                        d="M21.582,6.186c-0.23-0.86-0.908-1.538-1.768-1.768C18.254,4,12,4,12,4S5.746,4,4.186,4.418 c-0.86,0.23-1.538,0.908-1.768,1.768C2,7.746,2,12,2,12s0,4.254,0.418,5.814c0.23,0.86,0.908,1.538,1.768,1.768 C5.746,20,12,20,12,20s6.254,0,7.814-0.418c0.861-0.23,1.538-0.908,1.768-1.768C22,16.254,22,12,22,12S22,7.746,21.582,6.186z M10,15.464V8.536L16,12L10,15.464z">
+                    </path>
+                </svg>
+                <span class="text-xl font-bold text-white">YT Downloader</span>
+            </div>
+            <nav class="hidden md:flex items-center gap-8">
+                <a href="#features" class="hover:text-red-400 transition-colors">Recursos</a>
+                <a href="#pricing" class="hover:text-red-400 transition-colors">Preços</a>
+                <a href="#faq" class="hover:text-red-400 transition-colors">FAQ</a>
+            </nav>
+            <div class="flex items-center gap-4">
+                <a href="#" class="text-sm text-gray-300 hover:text-white">Login</a>
+                <a href="#"
+                    class="px-5 py-2.5 text-sm font-semibold text-white bg-red-600 rounded-lg hover:bg-red-700 transition-colors shadow-lg shadow-red-600/20">Criar
+                    Conta Grátis</a>
+            </div>
+        </div>
+    </header>
+
+    <main>
+        <!-- Hero Section -->
+        <section class="relative pt-32 pb-20 md:pt-48 md:pb-32 overflow-hidden">
+            <div
+                class="absolute inset-0 bg-grid-gray-700/10 bg-grid-16 [mask-image:radial-gradient(ellipse_at_center,white,transparent_75%)]">
+            </div>
+            <div class="container mx-auto px-6 text-center">
+                <h1 class="text-4xl md:text-6xl lg:text-7xl font-extrabold text-white tracking-tighter mb-6">
+                    Sua Central de Conteúdo do <span class="gradient-text">YouTube</span>
+                </h1>
+                <p class="max-w-3xl mx-auto text-lg md:text-xl text-gray-400 mb-10">
+                    Transforme vídeos em qualquer formato, extraia insights com resumos de IA e gere posts para redes
+                    sociais com um clique. Acelere seu fluxo de trabalho.
+                </p>
+                <div class="flex justify-center gap-4">
+                    <a href="#"
+                        class="px-8 py-4 font-semibold text-white bg-red-600 rounded-lg hover:bg-red-700 transition-colors shadow-2xl shadow-red-600/30">Começar
+                        de Graça</a>
+                </div>
+                <div class="mt-16 max-w-5xl mx-auto">
+                    <img src="https://placehold.co/1200x700/1f2937/4b5563?text=Mockup+do+Produto+Aqui"
+                        alt="Interface do YT Downloader" class="rounded-2xl shadow-2xl border border-gray-700/50">
+                </div>
+            </div>
+        </section>
+
+        <!-- Features Section -->
+        <section id="features" class="py-20 bg-gray-900/50">
+            <div class="container mx-auto px-6">
+                <div class="text-center mb-16">
+                    <span class="text-red-500 font-semibold">TUDO EM UM SÓ LUGAR</span>
+                    <h2 class="text-3xl md:text-4xl font-bold text-white mt-2">Mais que um simples downloader.</h2>
+                    <p class="max-w-2xl mx-auto text-gray-400 mt-4">Ferramentas inteligentes para quem cria e consome
+                        conteúdo.</p>
+                </div>
+                <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
+                    <!-- Feature 1: Download -->
+                    <div class="glass-effect p-8 rounded-2xl">
+                        <div class="bg-red-500/10 inline-block p-3 rounded-xl mb-4"><svg
+                                xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"
+                                fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                stroke-linejoin="round" class="text-red-400">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                <polyline points="7 10 12 15 17 10" />
+                                <line x1="12" x2="12" y1="15" y2="3" />
+                            </svg></div>
+                        <h3 class="text-xl font-bold text-white mb-2">Downloads Rápidos</h3>
+                        <p class="text-gray-400">Baixe vídeos ou apenas o áudio em alta qualidade. Nosso sistema de
+                            filas processa tudo em segundo plano para você não perder tempo.</p>
+                    </div>
+                    <!-- Feature 2: AI Summary -->
+                    <div class="glass-effect p-8 rounded-2xl">
+                        <div class="bg-purple-500/10 inline-block p-3 rounded-xl mb-4"><svg
+                                xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"
+                                fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                stroke-linejoin="round" class="text-purple-400">
+                                <path
+                                    d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
+                                <path d="M5 3v4" />
+                                <path d="M19 17v4" />
+                                <path d="M3 5h4" />
+                                <path d="M17 19h4" />
+                            </svg></div>
+                        <h3 class="text-xl font-bold text-white mb-2">Resumos com IA</h3>
+                        <p class="text-gray-400">Não tem certeza se vale a pena assistir? Obtenha um resumo inteligente
+                            do vídeo com um único clique, powered by Gemini.</p>
+                    </div>
+                    <!-- Feature 3: AI Tweet -->
+                    <div class="glass-effect p-8 rounded-2xl">
+                        <div class="bg-cyan-500/10 inline-block p-3 rounded-xl mb-4"><svg
+                                xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"
+                                fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                stroke-linejoin="round" class="text-cyan-400">
+                                <path d="M18 6 7 17l-5-5" />
+                                <path d="m22 10-7.5 7.5L9 13" />
+                            </svg></div>
+                        <h3 class="text-xl font-bold text-white mb-2">Reaproveite Conteúdo</h3>
+                        <p class="text-gray-400">Transforme qualquer vídeo em um tweet pronto para postar, com hashtags
+                            relevantes, e multiplique seu alcance nas redes sociais.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Pricing Section -->
+        <section id="pricing" class="py-20">
+            <div class="container mx-auto px-6">
+                <div class="text-center mb-16">
+                    <h2 class="text-3xl md:text-4xl font-bold text-white">Um plano para cada necessidade.</h2>
+                    <p class="max-w-xl mx-auto text-gray-400 mt-4">Comece de graça e evolua quando precisar de mais
+                        poder.</p>
+                </div>
+
+                <div class="max-w-4xl mx-auto grid lg:grid-cols-2 gap-8">
+                    <!-- Free Plan -->
+                    <div class="border border-gray-700 rounded-2xl p-8 flex flex-col">
+                        <h3 class="text-2xl font-bold text-white">Básico</h3>
+                        <p class="text-gray-400 mt-2">Perfeito para começar a explorar.</p>
+                        <div class="mt-6">
+                            <span class="text-5xl font-extrabold text-white">R$0</span>
+                            <span class="text-gray-400">/para sempre</span>
+                        </div>
+                        <ul class="space-y-4 mt-8 text-gray-300 flex-grow">
+                            <li class="flex items-center gap-3"><svg xmlns="http://www.w3.org/2000/svg" width="20"
+                                    height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"
+                                    stroke-linecap="round" stroke-linejoin="round" class="text-green-500">
+                                    <path d="M20 6 9 17l-5-5" />
+                                </svg>5 Downloads / dia</li>
+                            <li class="flex items-center gap-3"><svg xmlns="http://www.w3.org/2000/svg" width="20"
+                                    height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"
+                                    stroke-linecap="round" stroke-linejoin="round" class="text-green-500">
+                                    <path d="M20 6 9 17l-5-5" />
+                                </svg>Qualidade Padrão (720p)</li>
+                            <li class="flex items-center gap-3"><svg xmlns="http://www.w3.org/2000/svg" width="20"
+                                    height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"
+                                    stroke-linecap="round" stroke-linejoin="round" class="text-green-500">
+                                    <path d="M20 6 9 17l-5-5" />
+                                </svg>2 Ações de IA / dia</li>
+                        </ul>
+                        <a href="#"
+                            class="mt-8 w-full block text-center px-6 py-3 font-semibold text-white bg-gray-700 rounded-lg hover:bg-gray-600 transition-colors">Começar
+                            Agora</a>
+                    </div>
+
+                    <!-- Pro Plan -->
+                    <div
+                        class="border-2 border-red-500 rounded-2xl p-8 flex flex-col relative shadow-2xl shadow-red-500/20">
+                        <div class="absolute top-0 -translate-y-1/2 left-1/2 -translate-x-1/2"><span
+                                class="bg-red-500 text-white text-xs font-bold px-3 py-1 rounded-full">MAIS
+                                POPULAR</span></div>
+                        <h3 class="text-2xl font-bold text-white">Pro</h3>
+                        <p class="text-red-300 mt-2">Para criadores e power-users.</p>
+                        <div class="mt-6">
+                            <span class="text-5xl font-extrabold text-white">R$29</span>
+                            <span class="text-gray-400">/mês</span>
+                        </div>
+                        <ul class="space-y-4 mt-8 text-gray-300 flex-grow">
+                            <li class="flex items-center gap-3"><svg xmlns="http://www.w3.org/2000/svg" width="20"
+                                    height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"
+                                    stroke-linecap="round" stroke-linejoin="round" class="text-red-400">
+                                    <path d="M20 6 9 17l-5-5" />
+                                </svg>Downloads Ilimitados</li>
+                            <li class="flex items-center gap-3"><svg xmlns="http://www.w3.org/2000/svg" width="20"
+                                    height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"
+                                    stroke-linecap="round" stroke-linejoin="round" class="text-red-400">
+                                    <path d="M20 6 9 17l-5-5" />
+                                </svg>Qualidade Máxima (até 4K)</li>
+                            <li class="flex items-center gap-3"><svg xmlns="http://www.w3.org/2000/svg" width="20"
+                                    height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"
+                                    stroke-linecap="round" stroke-linejoin="round" class="text-red-400">
+                                    <path d="M20 6 9 17l-5-5" />
+                                </svg>Ações de IA Ilimitadas</li>
+                            <li class="flex items-center gap-3"><svg xmlns="http://www.w3.org/2000/svg" width="20"
+                                    height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"
+                                    stroke-linecap="round" stroke-linejoin="round" class="text-red-400">
+                                    <path d="M20 6 9 17l-5-5" />
+                                </svg>Download de Playlists Inteiras</li>
+                            <li class="flex items-center gap-3"><svg xmlns="http://www.w3.org/2000/svg" width="20"
+                                    height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"
+                                    stroke-linecap="round" stroke-linejoin="round" class="text-red-400">
+                                    <path d="M20 6 9 17l-5-5" />
+                                </svg>Fila de Processamento Prioritária</li>
+                        </ul>
+                        <a href="#"
+                            class="mt-8 w-full block text-center px-6 py-3 font-semibold text-white bg-red-600 rounded-lg hover:bg-red-700 transition-colors">Quero
+                            o Plano Pro</a>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- FAQ Section -->
+        <section id="faq" class="py-20 bg-gray-900/50">
+            <div class="container mx-auto px-6">
+                <div class="text-center mb-16 max-w-2xl mx-auto">
+                    <h2 class="text-3xl md:text-4xl font-bold text-white">Dúvidas Frequentes</h2>
+                    <p class="text-gray-400 mt-4">Tudo o que você precisa saber antes de começar.</p>
+                </div>
+                <div class="max-w-3xl mx-auto space-y-4" x-data="{ open: 1 }">
+                    <!-- FAQ Item 1 -->
+                    <div class="bg-gray-800 rounded-lg">
+                        <button @click="open = (open === 1 ? 0 : 1)"
+                            class="w-full flex justify-between items-center p-6 text-left">
+                            <span class="font-semibold text-white">É legal usar este serviço?</span>
+                            <svg class="w-5 h-5 text-gray-400 transition-transform" :class="{'rotate-180': open === 1}"
+                                xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                                <path fill-rule="evenodd"
+                                    d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
+                                    clip-rule="evenodd" />
+                            </svg>
+                        </button>
+                        <div x-show="open === 1" x-collapse class="px-6 pb-6 text-gray-400">
+                            <p>Nossa ferramenta foi projetada para uso pessoal, como baixar cópias de segurança de seu
+                                próprio conteúdo ou de vídeos sob domínio público. É responsabilidade do usuário
+                                respeitar os direitos autorais e os termos de serviço do YouTube.</p>
+                        </div>
+                    </div>
+                    <!-- FAQ Item 2 -->
+                    <div class="bg-gray-800 rounded-lg">
+                        <button @click="open = (open === 2 ? 0 : 2)"
+                            class="w-full flex justify-between items-center p-6 text-left">
+                            <span class="font-semibold text-white">Quão seguro é o login?</span>
+                            <svg class="w-5 h-5 text-gray-400 transition-transform" :class="{'rotate-180': open === 2}"
+                                xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                                <path fill-rule="evenodd"
+                                    d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
+                                    clip-rule="evenodd" />
+                            </svg>
+                        </button>
+                        <div x-show="open === 2" x-collapse class="px-6 pb-6 text-gray-400">
+                            <p>Utilizamos os protocolos de autenticação mais seguros do mercado, incluindo login social
+                                via Google e GitHub (OAuth 2.0). Seus dados estão seguros conosco e nunca
+                                compartilharemos suas informações.</p>
+                        </div>
+                    </div>
+                    <!-- FAQ Item 3 -->
+                    <div class="bg-gray-800 rounded-lg">
+                        <button @click="open = (open === 3 ? 0 : 3)"
+                            class="w-full flex justify-between items-center p-6 text-left">
+                            <span class="font-semibold text-white">Como funcionam os resumos de IA?</span>
+                            <svg class="w-5 h-5 text-gray-400 transition-transform" :class="{'rotate-180': open === 3}"
+                                xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                                <path fill-rule="evenodd"
+                                    d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
+                                    clip-rule="evenodd" />
+                            </svg>
+                        </button>
+                        <div x-show="open === 3" x-collapse class="px-6 pb-6 text-gray-400">
+                            <p>Nossa inteligência artificial, baseada na API Gemini do Google, analisa o título e
+                                metadados do vídeo para gerar um resumo coeso e informativo, ajudando você a captar a
+                                essência do conteúdo rapidamente.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Final CTA -->
+        <section class="py-20">
+            <div class="container mx-auto px-6 text-center">
+                <h2 class="text-3xl md:text-4xl font-bold text-white">Pronto para otimizar seu conteúdo?</h2>
+                <p class="max-w-xl mx-auto text-gray-400 mt-4 mb-8">Crie sua conta gratuita e junte-se a milhares de
+                    criadores e profissionais que estão trabalhando de forma mais inteligente.</p>
+                <a href="#"
+                    class="px-8 py-4 font-semibold text-white bg-red-600 rounded-lg hover:bg-red-700 transition-colors shadow-2xl shadow-red-600/30">Começar
+                    de Graça Agora</a>
+            </div>
+        </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-gray-900/70 border-t border-gray-800">
+        <div class="container mx-auto px-6 py-8">
+            <div class="flex flex-col md:flex-row justify-between items-center">
+                <p class="text-sm text-gray-400">&copy; 2024 YT Downloader. Todos os direitos reservados.</p>
+                <div class="flex gap-6 mt-4 md:mt-0">
+                    <a href="#" class="text-sm text-gray-400 hover:text-white">Termos de Serviço</a>
+                    <a href="#" class="text-sm text-gray-400 hover:text-white">Política de Privacidade</a>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+</body>
+
+</html>
