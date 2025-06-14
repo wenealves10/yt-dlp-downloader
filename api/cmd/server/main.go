@@ -3,58 +3,46 @@ package main
 import (
 	"fmt"
 	"log"
-	"net/http"
-	"time"
 
-	"github.com/wenealves10/yt-dlp-downloader/pkg/sse"
+	"github.com/hibiken/asynq"
+	"github.com/wenealves10/yt-dlp-downloader/internal/configs"
+	"github.com/wenealves10/yt-dlp-downloader/internal/queues"
+	"github.com/wenealves10/yt-dlp-downloader/internal/tasks"
 )
 
-var manager = sse.NewSSEManager()
-
 func main() {
-	http.HandleFunc("/events", streamHandler)
-	http.HandleFunc("/send", sendHandler)
+	redisAddr := fmt.Sprintf("%s:%s", configs.REDIS_HOST, configs.REDIS_PORT)
+	client := asynq.NewClient(asynq.RedisClientOpt{
+		Addr:     redisAddr,
+		Username: configs.REDIS_USERNAME,
+		Password: configs.REDIS_PASSWORD,
+	})
+	defer client.Close()
 
-	log.Println("Servidor iniciado em http://localhost:8080")
-	log.Fatal(http.ListenAndServe(":8080", nil))
-}
-
-func streamHandler(w http.ResponseWriter, r *http.Request) {
-	id := r.URL.Query().Get("id")
-	if id == "" {
-		http.Error(w, "falta o id", http.StatusBadRequest)
-		return
+	// Enqueue a task video
+	task, err := tasks.NewDownloadVideoTask("https://www.youtube.com/watch?v=HWjoQ92VKEs&ab_channel=DanX")
+	if err != nil {
+		log.Fatalf("failed to create task: %v", err)
 	}
 
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-
-	sub := manager.Subscribe(id)
-	defer manager.Unsubscribe(id, sub)
-
-	notify := w.(http.Flusher)
-
-	for {
-		select {
-		case msg := <-sub:
-			fmt.Fprintf(w, "data: %s\n\n", msg)
-			notify.Flush()
-		case <-r.Context().Done():
-			return
-		}
-	}
-}
-
-func sendHandler(w http.ResponseWriter, r *http.Request) {
-	id := r.URL.Query().Get("id")
-	if id == "" {
-		http.Error(w, "falta o id", http.StatusBadRequest)
-		return
+	// Enqueue the task video
+	info, err := client.Enqueue(task, asynq.Queue(queues.TypeDownloadVideoQueue))
+	if err != nil {
+		log.Fatalf("failed to enqueue task: %v", err)
 	}
 
-	msg := fmt.Sprintf("Hora atual: %s", time.Now().Format(time.RFC3339))
-	manager.Publish(id, msg)
+	// Enqueue a task music
+	taskMusic, err := tasks.NewDownloadMusicTask("https://www.youtube.com/watch?v=HWjoQ92VKEs&ab_channel=DanX")
+	if err != nil {
+		log.Fatalf("failed to create music task: %v", err)
+	}
 
-	fmt.Fprintf(w, "Mensagem enviada para id %s\n", id)
+	// Enqueue the task music
+	infoMusic, err := client.Enqueue(taskMusic, asynq.Queue(queues.TypeDownloadMusicQueue))
+	if err != nil {
+		log.Fatalf("failed to enqueue music task: %v", err)
+	}
+	log.Printf("Enqueued task video: ID=%s, Type=%s, Queue=%s", info.ID, info.Type, info.Queue)
+	log.Printf("Enqueued task music: ID=%s, Type=%s, Queue=%s", infoMusic.ID, infoMusic.Type, infoMusic.Queue)
+
 }

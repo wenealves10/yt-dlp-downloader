@@ -56,6 +56,7 @@ func (m *SSEManager) Publish(id, message string) {
 		select {
 		case sub <- message:
 		default:
+			// canal lotado ou subscriber desconectado ignorar
 		}
 	}
 }
