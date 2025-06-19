@@ -19,19 +19,19 @@ INSERT INTO users (
 VALUES (
   $1, $2, $3, $4, $5, $6, $7, $8, $9
 )
-RETURNING id, full_name, email, hashed_password, password_changed_at, active, plan, daily_limit, last_login, is_verified, created_at, updated_at
+RETURNING id, full_name, photo_url, email, hashed_password, password_changed_at, active, plan, daily_limit, last_login, is_verified, created_at, updated_at
 `
 
 type CreateUserParams struct {
-	ID                uuid.UUID
-	FullName          string
-	Email             string
-	HashedPassword    string
-	Plan              CorePlanType
-	DailyLimit        int32
-	Active            bool
-	IsVerified        bool
-	PasswordChangedAt *time.Time
+	ID                uuid.UUID    `json:"id"`
+	FullName          string       `json:"full_name"`
+	Email             string       `json:"email"`
+	HashedPassword    string       `json:"hashed_password"`
+	Plan              CorePlanType `json:"plan"`
+	DailyLimit        int32        `json:"daily_limit"`
+	Active            bool         `json:"active"`
+	IsVerified        bool         `json:"is_verified"`
+	PasswordChangedAt *time.Time   `json:"password_changed_at"`
 }
 
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, error) {
@@ -50,6 +50,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 	err := row.Scan(
 		&i.ID,
 		&i.FullName,
+		&i.PhotoUrl,
 		&i.Email,
 		&i.HashedPassword,
 		&i.PasswordChangedAt,
@@ -65,7 +66,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, full_name, email, hashed_password, password_changed_at, active, plan, daily_limit, last_login, is_verified, created_at, updated_at FROM users WHERE email = $1 LIMIT 1
+SELECT id, full_name, photo_url, email, hashed_password, password_changed_at, active, plan, daily_limit, last_login, is_verified, created_at, updated_at FROM users WHERE email = $1 LIMIT 1
 `
 
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
@@ -74,6 +75,7 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 	err := row.Scan(
 		&i.ID,
 		&i.FullName,
+		&i.PhotoUrl,
 		&i.Email,
 		&i.HashedPassword,
 		&i.PasswordChangedAt,
@@ -89,7 +91,7 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, full_name, email, hashed_password, password_changed_at, active, plan, daily_limit, last_login, is_verified, created_at, updated_at FROM users WHERE id = $1 LIMIT 1
+SELECT id, full_name, photo_url, email, hashed_password, password_changed_at, active, plan, daily_limit, last_login, is_verified, created_at, updated_at FROM users WHERE id = $1 LIMIT 1
 `
 
 func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
@@ -98,6 +100,7 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 	err := row.Scan(
 		&i.ID,
 		&i.FullName,
+		&i.PhotoUrl,
 		&i.Email,
 		&i.HashedPassword,
 		&i.PasswordChangedAt,
@@ -113,7 +116,7 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 }
 
 const getUsers = `-- name: GetUsers :many
-SELECT id, full_name, email, hashed_password, password_changed_at, active, plan, daily_limit, last_login, is_verified, created_at, updated_at FROM users
+SELECT id, full_name, photo_url, email, hashed_password, password_changed_at, active, plan, daily_limit, last_login, is_verified, created_at, updated_at FROM users
 ORDER BY created_at DESC
 `
 
@@ -123,12 +126,13 @@ func (q *Queries) GetUsers(ctx context.Context) ([]User, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []User
+	items := []User{}
 	for rows.Next() {
 		var i User
 		if err := rows.Scan(
 			&i.ID,
 			&i.FullName,
+			&i.PhotoUrl,
 			&i.Email,
 			&i.HashedPassword,
 			&i.PasswordChangedAt,

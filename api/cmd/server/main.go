@@ -1,48 +1,80 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 
 	"github.com/hibiken/asynq"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/wenealves10/yt-dlp-downloader/internal/configs"
-	"github.com/wenealves10/yt-dlp-downloader/internal/queues"
-	"github.com/wenealves10/yt-dlp-downloader/internal/tasks"
+	"github.com/wenealves10/yt-dlp-downloader/internal/db"
+	"github.com/wenealves10/yt-dlp-downloader/internal/server"
 )
 
 func main() {
-	redisAddr := fmt.Sprintf("%s:%s", configs.REDIS_HOST, configs.REDIS_PORT)
-	client := asynq.NewClient(asynq.RedisClientOpt{
+	config, err := configs.LoadConfig(".")
+	if err != nil {
+		log.Fatalf("cannot load config: %v", err)
+	}
+
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, config.DBSource)
+	if err != nil {
+		log.Fatal("Erro ao conectar no banco:", err)
+	}
+	defer pool.Close()
+
+	store := db.NewStore(pool)
+
+	redisAddr := fmt.Sprintf("%s:%s", config.RedisHost, config.RedisPort)
+	asynqClient := asynq.NewClient(asynq.RedisClientOpt{
 		Addr:     redisAddr,
-		Username: configs.REDIS_USERNAME,
-		Password: configs.REDIS_PASSWORD,
+		Username: config.RedisUsername,
+		Password: config.RedisPassword,
 	})
-	defer client.Close()
+	defer asynqClient.Close()
 
-	// Enqueue a task video
-	task, err := tasks.NewDownloadVideoTask("https://www.youtube.com/watch?v=HWjoQ92VKEs&ab_channel=DanX")
+	api, err := server.NewServer(config, store, asynqClient)
 	if err != nil {
-		log.Fatalf("failed to create task: %v", err)
+		log.Fatalf("cannot create server: %v", err)
 	}
 
-	// Enqueue the task video
-	info, err := client.Enqueue(task, asynq.Queue(queues.TypeDownloadVideoQueue))
-	if err != nil {
-		log.Fatalf("failed to enqueue task: %v", err)
+	if err := api.Start(config.ServerAddress); err != nil {
+		log.Fatalf("cannot start server: %v", err)
 	}
-
-	// Enqueue a task music
-	taskMusic, err := tasks.NewDownloadMusicTask("https://www.youtube.com/watch?v=HWjoQ92VKEs&ab_channel=DanX")
-	if err != nil {
-		log.Fatalf("failed to create music task: %v", err)
-	}
-
-	// Enqueue the task music
-	infoMusic, err := client.Enqueue(taskMusic, asynq.Queue(queues.TypeDownloadMusicQueue))
-	if err != nil {
-		log.Fatalf("failed to enqueue music task: %v", err)
-	}
-	log.Printf("Enqueued task video: ID=%s, Type=%s, Queue=%s", info.ID, info.Type, info.Queue)
-	log.Printf("Enqueued task music: ID=%s, Type=%s, Queue=%s", infoMusic.ID, infoMusic.Type, infoMusic.Queue)
-
 }
+
+// redisAddr := fmt.Sprintf("%s:%s", configs.REDIS_HOST, configs.REDIS_PORT)
+// 	client := asynq.NewClient(asynq.RedisClientOpt{
+// 		Addr:     redisAddr,
+// 		Username: configs.REDIS_USERNAME,
+// 		Password: configs.REDIS_PASSWORD,
+// 	})
+// 	defer client.Close()
+
+// 	// Enqueue a task video
+// 	task, err := tasks.NewDownloadVideoTask("https://www.youtube.com/watch?v=HWjoQ92VKEs&ab_channel=DanX")
+// 	if err != nil {
+// 		log.Fatalf("failed to create task: %v", err)
+// 	}
+
+// 	// Enqueue the task video
+// 	info, err := client.Enqueue(task, asynq.Queue(queues.TypeDownloadVideoQueue))
+// 	if err != nil {
+// 		log.Fatalf("failed to enqueue task: %v", err)
+// 	}
+
+// 	// Enqueue a task music
+// 	taskMusic, err := tasks.NewDownloadMusicTask("https://www.youtube.com/watch?v=HWjoQ92VKEs&ab_channel=DanX")
+// 	if err != nil {
+// 		log.Fatalf("failed to create music task: %v", err)
+// 	}
+
+// 	// Enqueue the task music
+// 	infoMusic, err := client.Enqueue(taskMusic, asynq.Queue(queues.TypeDownloadMusicQueue))
+// 	if err != nil {
+// 		log.Fatalf("failed to enqueue music task: %v", err)
+// 	}
+// 	log.Printf("Enqueued task video: ID=%s, Type=%s, Queue=%s", info.ID, info.Type, info.Queue)
+// 	log.Printf("Enqueued task music: ID=%s, Type=%s, Queue=%s", infoMusic.ID, infoMusic.Type, infoMusic.Queue)

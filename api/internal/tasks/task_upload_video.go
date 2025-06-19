@@ -7,14 +7,16 @@ import (
 )
 
 type UploadVideoPayload struct {
-	VideoPath string `json:"video_path"`
-	Filename  string `json:"filename"`
+	DownloadID string `json:"download_id"`
+	VideoPath  string `json:"video_path"`
+	Filename   string `json:"filename"`
 }
 
-func NewUploadVideoTask(videoPath, filename string) (*asynq.Task, error) {
+func NewUploadVideoTask(videoPath, downloadID, filename string) (*asynq.Task, error) {
 	payload, err := json.Marshal(UploadVideoPayload{
-		VideoPath: videoPath,
-		Filename:  filename,
+		DownloadID: downloadID,
+		VideoPath:  videoPath,
+		Filename:   filename,
 	})
 	if err != nil {
 		return nil, err

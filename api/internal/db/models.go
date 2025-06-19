@@ -38,8 +38,8 @@ func (e *CoreDownloadStatus) Scan(src interface{}) error {
 }
 
 type NullCoreDownloadStatus struct {
-	CoreDownloadStatus CoreDownloadStatus
-	Valid              bool // Valid is true if CoreDownloadStatus is not NULL
+	CoreDownloadStatus CoreDownloadStatus `json:"core_download_status"`
+	Valid              bool               `json:"valid"` // Valid is true if CoreDownloadStatus is not NULL
 }
 
 // Scan implements the Scanner interface.
@@ -84,8 +84,8 @@ func (e *CoreFormatType) Scan(src interface{}) error {
 }
 
 type NullCoreFormatType struct {
-	CoreFormatType CoreFormatType
-	Valid          bool // Valid is true if CoreFormatType is not NULL
+	CoreFormatType CoreFormatType `json:"core_format_type"`
+	Valid          bool           `json:"valid"` // Valid is true if CoreFormatType is not NULL
 }
 
 // Scan implements the Scanner interface.
@@ -127,8 +127,8 @@ func (e *CorePlanType) Scan(src interface{}) error {
 }
 
 type NullCorePlanType struct {
-	CorePlanType CorePlanType
-	Valid        bool // Valid is true if CorePlanType is not NULL
+	CorePlanType CorePlanType `json:"core_plan_type"`
+	Valid        bool         `json:"valid"` // Valid is true if CorePlanType is not NULL
 }
 
 // Scan implements the Scanner interface.
@@ -150,30 +150,31 @@ func (ns NullCorePlanType) Value() (driver.Value, error) {
 }
 
 type Download struct {
-	ID              uuid.UUID
-	UserID          uuid.UUID
-	OriginalUrl     string
-	Format          CoreFormatType
-	Status          CoreDownloadStatus
-	ThumbnailUrl    pgtype.Text
-	FileUrl         pgtype.Text
-	ExpiresAt       pgtype.Timestamptz
-	DurationSeconds pgtype.Int4
-	ErrorMessage    pgtype.Text
-	CreatedAt       *time.Time
+	ID              uuid.UUID          `json:"id"`
+	UserID          uuid.UUID          `json:"user_id"`
+	OriginalUrl     string             `json:"original_url"`
+	Format          CoreFormatType     `json:"format"`
+	Status          CoreDownloadStatus `json:"status"`
+	ThumbnailUrl    pgtype.Text        `json:"thumbnail_url"`
+	FileUrl         pgtype.Text        `json:"file_url"`
+	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
+	DurationSeconds pgtype.Int4        `json:"duration_seconds"`
+	ErrorMessage    pgtype.Text        `json:"error_message"`
+	CreatedAt       *time.Time         `json:"created_at"`
 }
 
 type User struct {
-	ID                uuid.UUID
-	FullName          string
-	Email             string
-	HashedPassword    string
-	PasswordChangedAt *time.Time
-	Active            bool
-	Plan              CorePlanType
-	DailyLimit        int32
-	LastLogin         pgtype.Timestamptz
-	IsVerified        bool
-	CreatedAt         *time.Time
-	UpdatedAt         *time.Time
+	ID                uuid.UUID          `json:"id"`
+	FullName          string             `json:"full_name"`
+	PhotoUrl          pgtype.Text        `json:"photo_url"`
+	Email             string             `json:"email"`
+	HashedPassword    string             `json:"hashed_password"`
+	PasswordChangedAt *time.Time         `json:"password_changed_at"`
+	Active            bool               `json:"active"`
+	Plan              CorePlanType       `json:"plan"`
+	DailyLimit        int32              `json:"daily_limit"`
+	LastLogin         pgtype.Timestamptz `json:"last_login"`
+	IsVerified        bool               `json:"is_verified"`
+	CreatedAt         *time.Time         `json:"created_at"`
+	UpdatedAt         *time.Time         `json:"updated_at"`
 }

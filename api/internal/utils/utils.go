@@ -3,6 +3,9 @@ package utils
 import (
 	"fmt"
 	"os"
+	"time"
+
+	"github.com/google/uuid"
 )
 
 func FileExists(path string) (bool, error) {
@@ -44,4 +47,25 @@ func RemoveFile(path string) error {
 		}
 	}
 	return nil
+}
+
+func GenerateUUID() uuid.UUID {
+	return uuid.New()
+}
+
+func GenerateUUIDString() string {
+	return uuid.New().String()
+}
+
+func ParseUUID(s string) (uuid.UUID, error) {
+	id, err := uuid.Parse(s)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("erro ao gerar UUID a partir da string '%s': %w", s, err)
+	}
+	return id, nil
+}
+
+func GetCurrentTime() *time.Time {
+	currentTime := time.Now()
+	return &currentTime
 }

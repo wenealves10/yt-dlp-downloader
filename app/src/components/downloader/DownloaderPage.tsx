@@ -9,12 +9,7 @@ import {
 } from "lucide-react";
 import { UserMenu } from "../user/UserMenu";
 import { DownloadCard } from "./DownloadCard";
-
-interface User {
-  name: string;
-  email: string;
-  avatar: string;
-}
+import { useAuth } from "../../hooks/useAuth";
 
 interface Job {
   id: number;
@@ -30,17 +25,8 @@ interface Job {
   isGeneratingTweet?: boolean;
 }
 
-interface DownloaderPageProps {
-  user: User;
-  onLogout: () => void;
-  onOpenSettings: () => void;
-}
-
-export const DownloaderPage: React.FC<DownloaderPageProps> = ({
-  user,
-  onLogout,
-  onOpenSettings,
-}) => {
+export const DownloaderPage: React.FC = () => {
+  const { user, logout } = useAuth();
   const [url, setUrl] = useState("");
   const [format, setFormat] = useState("video");
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -153,11 +139,7 @@ export const DownloaderPage: React.FC<DownloaderPageProps> = ({
               </h1>
             </div>
           </div>
-          <UserMenu
-            user={user}
-            onLogout={onLogout}
-            onOpenSettings={onOpenSettings}
-          />
+          <UserMenu user={user} onLogout={logout} />
         </header>
 
         <section className="bg-gray-800 p-6 rounded-xl shadow-2xl border border-gray-700">

@@ -4,22 +4,29 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os/exec"
 
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
+	"github.com/wenealves10/yt-dlp-downloader/internal/db"
+	"github.com/wenealves10/yt-dlp-downloader/internal/libs/stream"
 	"github.com/wenealves10/yt-dlp-downloader/internal/queues"
 	"github.com/wenealves10/yt-dlp-downloader/internal/tasks"
 	"github.com/wenealves10/yt-dlp-downloader/internal/utils"
 )
 
 type JobDownloadVideo struct {
-	client *asynq.Client
+	client   *asynq.Client
+	store    db.Store
+	rdStream stream.EventPublisher
 }
 
-func NewJobDownloadVideo(client *asynq.Client) *JobDownloadVideo {
+func NewJobDownloadVideo(client *asynq.Client, store db.Store, rdStream stream.EventPublisher) *JobDownloadVideo {
 	return &JobDownloadVideo{
-		client: client,
+		client:   client,
+		store:    store,
+		rdStream: rdStream,
 	}
 }
 
@@ -32,13 +39,40 @@ func (p *JobDownloadVideo) ProcessTask(ctx context.Context, task *asynq.Task) er
 	filename := fmt.Sprintf("video_%s.mp4", uuid.New().String())
 	outputPath := "./uploads/videos"
 
-	outputFilePath, err := p.downloadVideo(ctx, filename, outputPath, payload.VideoURL)
+	// Check if the download ID exists in the database
+	downloadID, err := utils.ParseUUID(payload.DownloadID)
+	if err != nil {
+		return fmt.Errorf("invalid download ID format: %v", err)
+	}
+
+	downloadExists, err := p.store.GetDownloadByID(ctx, downloadID)
+	if err != nil {
+		return fmt.Errorf("failed to check download existence: %v", err)
+	}
+
+	// atualiza o status do download para "in_progress"
+	if err := p.store.UpdateDownloadStatus(ctx, db.UpdateDownloadStatusParams{
+		ID:     downloadExists.ID,
+		Status: db.CoreDownloadStatusPROCESSING,
+	}); err != nil {
+		return fmt.Errorf("failed to update download status: %v", err)
+	}
+
+	if err := p.rdStream.Publish(ctx, stream.DownloadEvent{
+		ID:     downloadExists.ID.String(),
+		UserID: downloadExists.UserID.String(),
+		Status: db.CoreDownloadStatusPROCESSING,
+	}); err != nil {
+		log.Println("failed to publish download event:", err)
+	}
+
+	outputFilePath, err := p.downloadVideo(ctx, filename, outputPath, downloadExists.OriginalUrl)
 	if err != nil {
 		return err
 	}
 
 	//send image uploader task
-	taskUpload, err := tasks.NewUploadVideoTask(outputFilePath, filename)
+	taskUpload, err := tasks.NewUploadVideoTask(outputFilePath, payload.DownloadID, filename)
 	if err != nil {
 		return fmt.Errorf("failed to create upload video task: %v", err)
 	}

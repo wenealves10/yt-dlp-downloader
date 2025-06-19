@@ -7,14 +7,16 @@ import (
 )
 
 type UploadMusicPayload struct {
-	MusicPath string `json:"music_path"`
-	Filename  string `json:"filename"`
+	DownloadID string `json:"download_id"`
+	MusicPath  string `json:"music_path"`
+	Filename   string `json:"filename"`
 }
 
-func NewUploadMusicTask(musicPath, filename string) (*asynq.Task, error) {
+func NewUploadMusicTask(musicPath, downloadID, filename string) (*asynq.Task, error) {
 	payload, err := json.Marshal(UploadMusicPayload{
-		MusicPath: musicPath,
-		Filename:  filename,
+		DownloadID: downloadID,
+		MusicPath:  musicPath,
+		Filename:   filename,
 	})
 	if err != nil {
 		return nil, err

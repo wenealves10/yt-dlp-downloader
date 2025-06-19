@@ -17,7 +17,27 @@ WHERE user_id = $1
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3;
 
+-- name: CountDownloadsByUser :one
+SELECT COUNT(*) FROM downloads
+WHERE user_id = $1;
+
 -- name: UpdateDownloadStatus :exec
 UPDATE downloads
 SET status = $2, error_message = $3
+WHERE id = $1;
+
+
+-- name: UpdateDownload :exec
+UPDATE downloads
+SET
+  status = $2,
+  file_url = $3,
+  thumbnail_url = $4,
+  expires_at = $5,
+  duration_seconds = $6,
+  error_message = $7
+WHERE id = $1;
+
+-- name: DeleteDownload :exec
+DELETE FROM downloads
 WHERE id = $1;

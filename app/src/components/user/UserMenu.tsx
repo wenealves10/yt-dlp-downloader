@@ -1,25 +1,17 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Settings, LogOut } from "lucide-react";
-
-interface User {
-  name: string;
-  email: string;
-  avatar: string;
-}
+import type { User } from "../../interface/User";
+import { useModalConfig } from "../../hooks/useModal";
 
 interface UserMenuProps {
-  user: User;
+  user: User | null;
   onLogout: () => void;
-  onOpenSettings: () => void;
 }
 
-export const UserMenu: React.FC<UserMenuProps> = ({
-  user,
-  onLogout,
-  onOpenSettings,
-}) => {
+export const UserMenu: React.FC<UserMenuProps> = ({ user, onLogout }) => {
   const [isOpen, setIsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const { toggleModal } = useModalConfig();
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -35,7 +27,7 @@ export const UserMenu: React.FC<UserMenuProps> = ({
     <div className="relative" ref={menuRef}>
       <button onClick={() => setIsOpen(!isOpen)}>
         <img
-          src={user.avatar}
+          src={user?.profile_url}
           alt="Avatar"
           className="w-10 h-10 rounded-full border-2 border-gray-600 hover:border-red-500 transition-colors"
         />
@@ -43,13 +35,15 @@ export const UserMenu: React.FC<UserMenuProps> = ({
       {isOpen && (
         <div className="absolute right-0 mt-2 w-56 bg-gray-800 rounded-lg shadow-xl border border-gray-700 animate-fade-in-fast z-10">
           <div className="p-4 border-b border-gray-700">
-            <p className="font-semibold text-white truncate">{user.name}</p>
-            <p className="text-sm text-gray-400 truncate">{user.email}</p>
+            <p className="font-semibold text-white truncate">
+              {user?.full_name}
+            </p>
+            <p className="text-sm text-gray-400 truncate">{user?.email}</p>
           </div>
           <div className="py-1">
             <button
               onClick={() => {
-                onOpenSettings();
+                toggleModal();
                 setIsOpen(false);
               }}
               className="w-full text-left flex items-center gap-3 px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white"

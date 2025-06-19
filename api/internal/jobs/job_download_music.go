@@ -4,22 +4,29 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os/exec"
 
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
+	"github.com/wenealves10/yt-dlp-downloader/internal/db"
+	"github.com/wenealves10/yt-dlp-downloader/internal/libs/stream"
 	"github.com/wenealves10/yt-dlp-downloader/internal/queues"
 	"github.com/wenealves10/yt-dlp-downloader/internal/tasks"
 	"github.com/wenealves10/yt-dlp-downloader/internal/utils"
 )
 
 type JobDownloadMusic struct {
-	client *asynq.Client
+	client   *asynq.Client
+	store    db.Store
+	rdStream stream.EventPublisher
 }
 
-func NewJobDownloadMusic(client *asynq.Client) *JobDownloadMusic {
+func NewJobDownloadMusic(client *asynq.Client, store db.Store, rdStream stream.EventPublisher) *JobDownloadMusic {
 	return &JobDownloadMusic{
-		client: client,
+		client:   client,
+		store:    store,
+		rdStream: rdStream,
 	}
 }
 
@@ -32,13 +39,40 @@ func (p *JobDownloadMusic) ProcessTask(ctx context.Context, task *asynq.Task) er
 	filename := fmt.Sprintf("music_%s.mp3", uuid.New().String())
 	outputPath := "./uploads/musics"
 
-	outputFilePath, err := p.downloadMusic(ctx, filename, outputPath, payload.MusicURL)
+	// Check if the download ID exists in the database
+	downloadID, err := utils.ParseUUID(payload.DownloadID)
+	if err != nil {
+		return fmt.Errorf("invalid download ID format: %v", err)
+	}
+
+	downloadExists, err := p.store.GetDownloadByID(ctx, downloadID)
+	if err != nil {
+		return fmt.Errorf("failed to check download existence: %v", err)
+	}
+
+	// atualiza o status do download para "in_progress"
+	if err := p.store.UpdateDownloadStatus(ctx, db.UpdateDownloadStatusParams{
+		ID:     downloadExists.ID,
+		Status: db.CoreDownloadStatusPROCESSING,
+	}); err != nil {
+		return fmt.Errorf("failed to update download status: %v", err)
+	}
+
+	if err := p.rdStream.Publish(ctx, stream.DownloadEvent{
+		ID:     downloadExists.ID.String(),
+		UserID: downloadExists.UserID.String(),
+		Status: db.CoreDownloadStatusPROCESSING,
+	}); err != nil {
+		log.Println("failed to publish download event:", err)
+	}
+
+	outputFilePath, err := p.downloadMusic(ctx, filename, outputPath, downloadExists.OriginalUrl)
 	if err != nil {
 		return err
 	}
 
 	//send uploader task
-	taskUpload, err := tasks.NewUploadMusicTask(outputFilePath, filename)
+	taskUpload, err := tasks.NewUploadMusicTask(outputFilePath, payload.DownloadID, filename)
 	if err != nil {
 		return fmt.Errorf("failed to create upload music task: %v", err)
 	}

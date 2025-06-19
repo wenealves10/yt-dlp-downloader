@@ -7,12 +7,12 @@ import (
 )
 
 type DownloadVideoPayload struct {
-	VideoURL string `json:"video_url"`
+	DownloadID string `json:"download_id"`
 }
 
-func NewDownloadVideoTask(videoURL string) (*asynq.Task, error) {
+func NewDownloadVideoTask(downloadID string) (*asynq.Task, error) {
 	payload, err := json.Marshal(DownloadVideoPayload{
-		VideoURL: videoURL,
+		DownloadID: downloadID,
 	})
 	if err != nil {
 		return nil, err

@@ -28,6 +28,7 @@ CREATE TYPE "core"."format_type" AS ENUM (
 CREATE TABLE "users" (
   "id" UUID PRIMARY KEY,
   "full_name" TEXT NOT NULL,
+  "photo_url" TEXT DEFAULT null,
   "email" VARCHAR(255) UNIQUE NOT NULL,
   "hashed_password" TEXT NOT NULL,
   "password_changed_at" TIMESTAMPTZ NOT NULL DEFAULT '0001-01-01 00:00:00Z',

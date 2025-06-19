@@ -12,6 +12,18 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countDownloadsByUser = `-- name: CountDownloadsByUser :one
+SELECT COUNT(*) FROM downloads
+WHERE user_id = $1
+`
+
+func (q *Queries) CountDownloadsByUser(ctx context.Context, userID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countDownloadsByUser, userID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createDownload = `-- name: CreateDownload :one
 INSERT INTO downloads (
   id, user_id, original_url, format, status, thumbnail_url, file_url, expires_at, duration_seconds, error_message
@@ -23,16 +35,16 @@ RETURNING id, user_id, original_url, format, status, thumbnail_url, file_url, ex
 `
 
 type CreateDownloadParams struct {
-	ID              uuid.UUID
-	UserID          uuid.UUID
-	OriginalUrl     string
-	Format          CoreFormatType
-	Status          CoreDownloadStatus
-	ThumbnailUrl    pgtype.Text
-	FileUrl         pgtype.Text
-	ExpiresAt       pgtype.Timestamptz
-	DurationSeconds pgtype.Int4
-	ErrorMessage    pgtype.Text
+	ID              uuid.UUID          `json:"id"`
+	UserID          uuid.UUID          `json:"user_id"`
+	OriginalUrl     string             `json:"original_url"`
+	Format          CoreFormatType     `json:"format"`
+	Status          CoreDownloadStatus `json:"status"`
+	ThumbnailUrl    pgtype.Text        `json:"thumbnail_url"`
+	FileUrl         pgtype.Text        `json:"file_url"`
+	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
+	DurationSeconds pgtype.Int4        `json:"duration_seconds"`
+	ErrorMessage    pgtype.Text        `json:"error_message"`
 }
 
 func (q *Queries) CreateDownload(ctx context.Context, arg CreateDownloadParams) (Download, error) {
@@ -63,6 +75,16 @@ func (q *Queries) CreateDownload(ctx context.Context, arg CreateDownloadParams) 
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const deleteDownload = `-- name: DeleteDownload :exec
+DELETE FROM downloads
+WHERE id = $1
+`
+
+func (q *Queries) DeleteDownload(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteDownload, id)
+	return err
 }
 
 const getDownloadByID = `-- name: GetDownloadByID :one
@@ -97,9 +119,9 @@ LIMIT $2 OFFSET $3
 `
 
 type GetDownloadsByUserParams struct {
-	UserID uuid.UUID
-	Limit  int32
-	Offset int32
+	UserID uuid.UUID `json:"user_id"`
+	Limit  int32     `json:"limit"`
+	Offset int32     `json:"offset"`
 }
 
 func (q *Queries) GetDownloadsByUser(ctx context.Context, arg GetDownloadsByUserParams) ([]Download, error) {
@@ -108,7 +130,7 @@ func (q *Queries) GetDownloadsByUser(ctx context.Context, arg GetDownloadsByUser
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Download
+	items := []Download{}
 	for rows.Next() {
 		var i Download
 		if err := rows.Scan(
@@ -134,6 +156,41 @@ func (q *Queries) GetDownloadsByUser(ctx context.Context, arg GetDownloadsByUser
 	return items, nil
 }
 
+const updateDownload = `-- name: UpdateDownload :exec
+UPDATE downloads
+SET
+  status = $2,
+  file_url = $3,
+  thumbnail_url = $4,
+  expires_at = $5,
+  duration_seconds = $6,
+  error_message = $7
+WHERE id = $1
+`
+
+type UpdateDownloadParams struct {
+	ID              uuid.UUID          `json:"id"`
+	Status          CoreDownloadStatus `json:"status"`
+	FileUrl         pgtype.Text        `json:"file_url"`
+	ThumbnailUrl    pgtype.Text        `json:"thumbnail_url"`
+	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
+	DurationSeconds pgtype.Int4        `json:"duration_seconds"`
+	ErrorMessage    pgtype.Text        `json:"error_message"`
+}
+
+func (q *Queries) UpdateDownload(ctx context.Context, arg UpdateDownloadParams) error {
+	_, err := q.db.Exec(ctx, updateDownload,
+		arg.ID,
+		arg.Status,
+		arg.FileUrl,
+		arg.ThumbnailUrl,
+		arg.ExpiresAt,
+		arg.DurationSeconds,
+		arg.ErrorMessage,
+	)
+	return err
+}
+
 const updateDownloadStatus = `-- name: UpdateDownloadStatus :exec
 UPDATE downloads
 SET status = $2, error_message = $3
@@ -141,9 +198,9 @@ WHERE id = $1
 `
 
 type UpdateDownloadStatusParams struct {
-	ID           uuid.UUID
-	Status       CoreDownloadStatus
-	ErrorMessage pgtype.Text
+	ID           uuid.UUID          `json:"id"`
+	Status       CoreDownloadStatus `json:"status"`
+	ErrorMessage pgtype.Text        `json:"error_message"`
 }
 
 func (q *Queries) UpdateDownloadStatus(ctx context.Context, arg UpdateDownloadStatusParams) error {

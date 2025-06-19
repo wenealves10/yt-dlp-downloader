@@ -7,12 +7,12 @@ import (
 )
 
 type DownloadMusicPayload struct {
-	MusicURL string `json:"music_url"`
+	DownloadID string `json:"download_id"`
 }
 
-func NewDownloadMusicTask(musicURL string) (*asynq.Task, error) {
+func NewDownloadMusicTask(downloadID string) (*asynq.Task, error) {
 	payload, err := json.Marshal(DownloadMusicPayload{
-		MusicURL: musicURL,
+		DownloadID: downloadID,
 	})
 	if err != nil {
 		return nil, err

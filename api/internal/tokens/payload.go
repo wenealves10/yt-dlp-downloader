@@ -15,12 +15,13 @@ var (
 
 type Payload struct {
 	ID        uuid.UUID `json:"id"`
+	UserID    string    `json:"user_id"`
 	Email     string    `json:"email"`
 	IssuedAt  time.Time `json:"issued_at"`
 	ExpiredAt time.Time `json:"expired_at"`
 }
 
-func NewPayload(email string, duration time.Duration) (*Payload, error) {
+func NewPayload(email string, userID string, duration time.Duration) (*Payload, error) {
 	tokenID, err := uuid.NewRandom()
 	if err != nil {
 		return nil, err
@@ -28,6 +29,7 @@ func NewPayload(email string, duration time.Duration) (*Payload, error) {
 
 	payload := &Payload{
 		ID:        tokenID,
+		UserID:    userID,
 		Email:     email,
 		IssuedAt:  time.Now(),
 		ExpiredAt: time.Now().Add(duration),
@@ -58,4 +60,12 @@ func (p *Payload) GetSubject() (string, error) {
 
 func (p *Payload) GetAudience() (jwt.ClaimStrings, error) {
 	return nil, nil // opcional
+}
+
+func (p *Payload) Valid() error {
+	if time.Now().After(p.ExpiredAt) {
+		return ErrExpiredToken
+	}
+
+	return nil
 }

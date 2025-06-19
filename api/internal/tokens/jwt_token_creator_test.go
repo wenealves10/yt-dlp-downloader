@@ -15,12 +15,13 @@ func TestJWTTokenCreator(t *testing.T) {
 	require.NoError(t, err)
 
 	email := fmt.Sprintf("%s@zmail.com", utils.RandomOwner())
+	userID := utils.RandomString(10) // Not used in JWTTokenCreator, but can be added if needed
 	duration := time.Minute
 
 	issuedAt := time.Now()
 	expiresAt := issuedAt.Add(duration)
 
-	token, err := tokenCreator.CreateToken(email, duration)
+	token, err := tokenCreator.CreateToken(email, userID, duration)
 	require.NoError(t, err)
 	require.NotEmpty(t, token)
 
@@ -38,7 +39,7 @@ func TestExpiredJWTTokenCreator(t *testing.T) {
 	tokenCreator, err := NewJWTTokenCreator(utils.RandomString(32))
 	require.NoError(t, err)
 
-	token, err := tokenCreator.CreateToken(utils.RandomOwner(), -time.Minute)
+	token, err := tokenCreator.CreateToken(utils.RandomOwner(), utils.RandomString(10), -time.Minute)
 	require.NoError(t, err)
 	require.NotEmpty(t, token)
 
@@ -49,12 +50,13 @@ func TestExpiredJWTTokenCreator(t *testing.T) {
 }
 
 func TestInvalidJWTTokenCreatorAlgNone(t *testing.T) {
-	payload, err := NewPayload(utils.RandomOwner(), time.Minute)
+	payload, err := NewPayload(utils.RandomOwner(), utils.RandomString(10), time.Minute)
 	require.NoError(t, err)
 
 	jwtToken := jwt.NewWithClaims(jwt.SigningMethodNone, jwt.MapClaims{
 		"id":         payload.ID,
 		"email":      payload.Email,
+		"user_id":    payload.UserID,
 		"issued_at":  payload.IssuedAt,
 		"expired_at": payload.ExpiredAt,
 	})

@@ -2,74 +2,65 @@ package configs
 
 import (
 	"fmt"
-	"os"
+	"time"
 
-	"github.com/joho/godotenv"
+	"github.com/spf13/viper"
 )
 
-// Variables for the database
-var (
-	ENV = "development"
-)
+type Config struct {
+	// Ambiente
+	Env string `mapstructure:"ENV"`
 
-// Variables for the database
-var (
-	REDIS_HOST     = ""
-	REDIS_PORT     = ""
-	REDIS_USERNAME = ""
-	REDIS_PASSWORD = ""
-)
-
-// Variables for AWS S3
-var (
-	ACCOUNT_ID        = ""
-	ACCESS_KEY_ID     = ""
-	SECRET_ACCESS_KEY = ""
-	REGION            = ""
-	BUCKET_NAME       = ""
-	ENDPOINT_URL      = ""
-)
-
-// DB variables
-var (
-	DB_HOST     = ""
-	DB_PORT     = ""
-	DB_USER     = ""
-	DB_PASSWORD = ""
-	DB_NAME     = ""
-)
-
-func init() {
-	ENV = os.Getenv("ENV")
-
-	if ENV != "production" {
-		err := godotenv.Load(".env")
-		if err != nil {
-			fmt.Println(err)
-		}
-	}
-
-	fmt.Printf("Loading environment variables for %s\n", ENV)
+	// Redis
+	RedisHost     string `mapstructure:"REDIS_HOST"`
+	RedisPort     string `mapstructure:"REDIS_PORT"`
+	RedisUsername string `mapstructure:"REDIS_USERNAME"`
+	RedisPassword string `mapstructure:"REDIS_PASSWORD"`
 
 	// AWS S3
-	ACCESS_KEY_ID = os.Getenv("ACCESS_KEY_ID")
-	SECRET_ACCESS_KEY = os.Getenv("SECRET_ACCESS_KEY")
-	REGION = os.Getenv("REGION")
-	BUCKET_NAME = os.Getenv("BUCKET_NAME")
-	ENDPOINT_URL = os.Getenv("ENDPOINT_URL")
-	ACCOUNT_ID = os.Getenv("ACCOUNT_ID")
+	AccountID       string `mapstructure:"ACCOUNT_ID"`
+	AccessKeyID     string `mapstructure:"ACCESS_KEY_ID"`
+	SecretAccessKey string `mapstructure:"SECRET_ACCESS_KEY"`
+	Region          string `mapstructure:"REGION"`
+	BucketName      string `mapstructure:"BUCKET_NAME"`
+	EndpointURL     string `mapstructure:"ENDPOINT_URL"`
 
-	// REDIS
-	REDIS_HOST = os.Getenv("REDIS_HOST")
-	REDIS_USERNAME = os.Getenv("REDIS_USERNAME")
-	REDIS_PASSWORD = os.Getenv("REDIS_PASSWORD")
-	REDIS_PORT = os.Getenv("REDIS_PORT")
+	// Database
+	DBHost     string `mapstructure:"DB_HOST"`
+	DBPort     string `mapstructure:"DB_PORT"`
+	DBUser     string `mapstructure:"DB_USER"`
+	DBPassword string `mapstructure:"DB_PASSWORD"`
+	DBName     string `mapstructure:"DB_NAME"`
 
-	// DB
-	DB_HOST = os.Getenv("DB_HOST")
-	DB_PORT = os.Getenv("DB_PORT")
-	DB_USER = os.Getenv("DB_USER")
-	DB_PASSWORD = os.Getenv("DB_PASSWORD")
-	DB_NAME = os.Getenv("DB_NAME")
+	// Geral
+	DBDriver            string        `mapstructure:"DB_DRIVER"`
+	DBSource            string        `mapstructure:"DB_SOURCE"`
+	ServerAddress       string        `mapstructure:"SERVER_ADDRESS"`
+	TokenPasetoKey      string        `mapstructure:"TOKEN_PASETO_KEY"`
+	AccessTokenDuration time.Duration `mapstructure:"ACCESS_TOKEN_DURATION"`
+}
 
+var LoadedConfig Config
+
+func LoadConfig(path string) (Config, error) {
+	viper.AddConfigPath(path)
+	viper.SetConfigName(".env")
+	viper.SetConfigType("env")
+
+	viper.AutomaticEnv()
+
+	err := viper.ReadInConfig()
+	if err != nil {
+		return Config{}, fmt.Errorf("erro ao ler .env: %w", err)
+	}
+
+	var config Config
+	err = viper.Unmarshal(&config)
+	if err != nil {
+		return Config{}, fmt.Errorf("erro ao mapear config: %w", err)
+	}
+
+	fmt.Printf("✔️  Variáveis carregadas para ambiente: %s\n", config.Env)
+	LoadedConfig = config
+	return config, nil
 }

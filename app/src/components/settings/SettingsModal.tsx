@@ -1,35 +1,26 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { X, User, Mail, KeyRound, Lock } from "lucide-react";
+import { useModalConfig } from "../../hooks/useModal";
+import { useAuth } from "../../hooks/useAuth";
 
-interface User {
-  name: string;
-  email: string;
-  avatar: string;
-}
-
-interface SettingsModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  user: User;
-  onUpdateUser: (user: User) => void;
-}
-
-export const SettingsModal: React.FC<SettingsModalProps> = ({
-  isOpen,
-  onClose,
-  user,
-  onUpdateUser,
-}) => {
+export const SettingsModal: React.FC = () => {
+  const { user } = useAuth();
+  const { isOpen, toggleModal } = useModalConfig();
   const [activeTab, setActiveTab] = useState("profile");
-  const [name, setName] = useState(user.name);
+  const [name, setName] = useState("");
 
-  if (!isOpen) return null;
+  useEffect(() => {
+    if (user) {
+      setName(user.full_name || "");
+    }
+  }, [user]);
 
   const handleSaveProfile = (e: React.FormEvent) => {
     e.preventDefault();
-    onUpdateUser({ ...user, name });
-    onClose();
+    toggleModal();
   };
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 animate-fade-in-fast">
@@ -38,7 +29,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           <h2 className="text-lg font-semibold text-white">
             Configurações da Conta
           </h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-white">
+          <button
+            onClick={toggleModal}
+            className="text-gray-400 hover:text-white"
+          >
             <X />
           </button>
         </header>
@@ -72,7 +66,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             >
               <div className="text-center mb-4">
                 <img
-                  src={user.avatar}
+                  src={user?.full_name}
                   alt="Avatar"
                   className="w-24 h-24 rounded-full mx-auto mb-2 border-2 border-red-500"
                 />
@@ -98,7 +92,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-500" />
                 <input
                   type="email"
-                  value={user.email}
+                  value={user?.email}
                   disabled
                   className="w-full bg-gray-700/50 border border-gray-600 rounded-lg py-3 pl-10 pr-4 text-gray-400 cursor-not-allowed"
                 />
