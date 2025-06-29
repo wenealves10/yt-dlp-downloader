@@ -1,10 +1,12 @@
+const apiUrl = import.meta.env.VITE_API_URL;
+
 export type LoginPayload = {
   email: string;
   password: string;
 };
 
 export async function login(payload: LoginPayload) {
-  const res = await fetch("http://localhost:8080/v1/auth/login", {
+  const res = await fetch(`${apiUrl}/v1/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -24,7 +26,7 @@ export type RegisterPayload = {
 };
 
 export async function register(payload: RegisterPayload) {
-  const res = await fetch("http://localhost:8080/v1/auth/register", {
+  const res = await fetch(`${apiUrl}/v1/auth/register`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),

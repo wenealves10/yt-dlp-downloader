@@ -1,5 +1,7 @@
-import { createContext, useState } from "react";
+import { createContext, useState, useEffect } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
 import type { User } from "../interface/User";
+import Loading from "../components/loading/Loading";
 
 type AuthContextType = {
   token: string | null;
@@ -16,16 +18,62 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     localStorage.getItem("token")
   );
   const [user, setUser] = useState<User | null>(null);
+  const [isChecking, setIsChecking] = useState(true);
 
-  const login = (token: string) => {
-    localStorage.setItem("token", token);
-    setToken(token);
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  const login = (newToken: string) => {
+    localStorage.setItem("token", newToken);
+    setToken(newToken);
   };
 
   const logout = () => {
     localStorage.removeItem("token");
     setToken(null);
+    setUser(null);
+    navigate("/", { replace: true });
   };
+
+  // Verificação automática do token ao iniciar
+  useEffect(() => {
+    const verifyToken = async () => {
+      if (!token) {
+        setIsChecking(false);
+        if (location.pathname !== "/") navigate("/", { replace: true });
+        return;
+      }
+
+      try {
+        const response = await fetch("http://localhost:8080/v1/profile", {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        });
+
+        if (!response.ok) {
+          throw new Error("Token inválido");
+        }
+
+        const userData = await response.json();
+        setUser(userData);
+
+        if (location.pathname === "/") {
+          navigate("/dashboard", { replace: true });
+        }
+      } catch (err) {
+        logout();
+      } finally {
+        setIsChecking(false);
+      }
+    };
+
+    verifyToken();
+  }, [token]);
+
+  // Enquanto verifica, pode exibir um loading global (opcional)
+  if (isChecking) return <Loading />;
 
   return (
     <AuthContext.Provider value={{ token, login, logout, user, setUser }}>

@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 	"github.com/wenealves10/yt-dlp-downloader/internal/db"
+	"github.com/wenealves10/yt-dlp-downloader/internal/helpers"
 	"github.com/wenealves10/yt-dlp-downloader/internal/libs/stream"
 	"github.com/wenealves10/yt-dlp-downloader/internal/queues"
 	"github.com/wenealves10/yt-dlp-downloader/internal/tasks"
@@ -71,8 +72,14 @@ func (p *JobDownloadVideo) ProcessTask(ctx context.Context, task *asynq.Task) er
 		return err
 	}
 
+	imagemBannerLocal := fmt.Sprintf("./uploads/videos/banners/%s_banner.jpg", uuid.New().String())
+	err = helpers.DownloadImage(ctx, downloadExists.ThumbnailUrl.String, imagemBannerLocal)
+	if err != nil {
+		return fmt.Errorf("failed to download video thumbnail: %v", err)
+	}
+
 	//send image uploader task
-	taskUpload, err := tasks.NewUploadVideoTask(outputFilePath, payload.DownloadID, filename)
+	taskUpload, err := tasks.NewUploadVideoTask(outputFilePath, payload.DownloadID, filename, imagemBannerLocal)
 	if err != nil {
 		return fmt.Errorf("failed to create upload video task: %v", err)
 	}

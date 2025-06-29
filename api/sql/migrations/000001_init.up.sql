@@ -45,6 +45,7 @@ CREATE TABLE "downloads" (
   "id" UUID PRIMARY KEY,
   "user_id" UUID NOT NULL,
   "original_url" TEXT NOT NULL,
+  "title" TEXT NOT NULL,
   "format" core.format_type NOT NULL,
   "status" core.download_status NOT NULL DEFAULT 'PENDING',
   "thumbnail_url" TEXT DEFAULT null,

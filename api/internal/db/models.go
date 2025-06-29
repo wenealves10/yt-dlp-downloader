@@ -153,6 +153,7 @@ type Download struct {
 	ID              uuid.UUID          `json:"id"`
 	UserID          uuid.UUID          `json:"user_id"`
 	OriginalUrl     string             `json:"original_url"`
+	Title           string             `json:"title"`
 	Format          CoreFormatType     `json:"format"`
 	Status          CoreDownloadStatus `json:"status"`
 	ThumbnailUrl    pgtype.Text        `json:"thumbnail_url"`

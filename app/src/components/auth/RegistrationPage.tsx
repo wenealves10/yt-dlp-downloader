@@ -14,7 +14,7 @@ export const RegistrationPage: React.FC = () => {
   const registerMutation = useMutation({
     mutationFn: (payload: RegisterPayload) => register(payload),
     onSuccess: (data) => {
-      navigate("/login");
+      navigate("/");
       alert("Conta criada com sucesso! Faça login para continuar.");
     },
     onError: () => {
@@ -31,7 +31,7 @@ export const RegistrationPage: React.FC = () => {
   };
 
   const onSwitchToLogin = () => {
-    navigate("/login");
+    navigate("/");
   };
 
   return (

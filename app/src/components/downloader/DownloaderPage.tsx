@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Youtube,
   Link,
@@ -10,14 +10,18 @@ import {
 import { UserMenu } from "../user/UserMenu";
 import { DownloadCard } from "./DownloadCard";
 import { useAuth } from "../../hooks/useAuth";
+import { useQuery } from "@tanstack/react-query";
+import { getData } from "../../api/getData";
+import { bucketHost } from "../../constants/config";
 
 interface Job {
-  id: number;
+  id: string;
   title?: string;
   status: "queue" | "processing" | "complete" | "error";
   format: string;
   thumbnail?: string;
   downloadUrl?: string;
+  durationSeconds?: number;
   completedAt?: number;
   summary?: string;
   tweet?: string;
@@ -25,13 +29,53 @@ interface Job {
   isGeneratingTweet?: boolean;
 }
 
+function convertStatus(apiStatus: string): Job["status"] {
+  switch (apiStatus) {
+    case "PENDING":
+    case "PROCESSING":
+      return "processing";
+    case "COMPLETED":
+      return "complete";
+    case "FAILED":
+      return "error";
+    default:
+      return "queue";
+  }
+}
+
 export const DownloaderPage: React.FC = () => {
-  const { user, logout } = useAuth();
+  const { user, logout, token } = useAuth();
   const [url, setUrl] = useState("");
   const [format, setFormat] = useState("video");
   const [jobs, setJobs] = useState<Job[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
+  const [page, setPage] = useState(1);
+  const [perPage] = useState(10);
+
+  const query = useQuery({
+    queryKey: ["downloads", page, perPage],
+    queryFn: () => getData(token || "")(perPage, page),
+    refetchOnWindowFocus: false,
+    enabled: !!token,
+  });
+
+  useEffect(() => {
+    if (query.data?.downloads) {
+      const mapped: Job[] = query.data.downloads.map((item) => ({
+        id: item.id,
+        title: item.title,
+        status: convertStatus(item.status),
+        durationSeconds: item.duration_seconds,
+        format: item.format.toLowerCase(),
+        thumbnail: `${bucketHost}/${item.thumbnail_url}`,
+        downloadUrl: `${bucketHost}/${item.file_url}`,
+        completedAt: new Date(item.created_at).getTime(),
+      }));
+
+      setJobs(mapped);
+    }
+  }, [query.data]);
 
   const handleDownload = (e: React.FormEvent) => {
     e.preventDefault();
@@ -41,91 +85,11 @@ export const DownloaderPage: React.FC = () => {
     }
     setError("");
     setIsLoading(true);
-    const newJob: Job = {
-      id: Date.now(),
-      title: "Obtendo informações...",
-      status: "queue",
-      format: format,
-    };
-    setJobs((prev) => [newJob, ...prev]);
+    //
     setUrl("");
-
-    setTimeout(() => {
-      setJobs((prev) =>
-        prev.map((j) =>
-          j.id === newJob.id ? { ...j, status: "processing" } : j
-        )
-      );
-      setTimeout(() => {
-        const isSuccess = Math.random() > 0.1;
-        setJobs((prev) =>
-          prev.map((j) =>
-            j.id === newJob.id
-              ? isSuccess
-                ? {
-                    ...j,
-                    status: "complete",
-                    title: `Explorando o Cosmos (${format})`,
-                    thumbnail: `https://placehold.co/480x360/1a1a1a/FFFFFF?text=Space`,
-                    completedAt: Date.now(),
-                  }
-                : { ...j, status: "error", title: "Falha no processamento" }
-              : j
-          )
-        );
-        setIsLoading(false);
-      }, 3000);
-    }, 1500);
   };
 
-  const handleRemoveJob = (id: number) =>
-    setJobs((prev) => prev.filter((job) => job.id !== id));
-
-  const handleGeminiAction = async (
-    jobId: number,
-    type: "summarize" | "tweet"
-  ) => {
-    const job = jobs.find((j) => j.id === jobId);
-    if (!job) return;
-
-    const prompt =
-      type === "summarize"
-        ? `Resuma o vídeo: "${job.title}" em português.`
-        : `Crie um tweet com hashtags para o vídeo: "${job.title}" em português.`;
-
-    const loadingKey =
-      type === "summarize" ? "isSummarizing" : "isGeneratingTweet";
-
-    setJobs((prev) =>
-      prev.map((j) => (j.id === jobId ? { ...j, [loadingKey]: true } : j))
-    );
-
-    try {
-      // Simulate API call
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-      const text =
-        type === "summarize"
-          ? "Este é um resumo simulado do vídeo sobre exploração do cosmos..."
-          : "🚀 Explorando o infinito cosmos! Descobertas incríveis sobre o universo #Cosmos #Ciência #Astronomia";
-
-      const resultKey = type === "summarize" ? "summary" : "tweet";
-      setJobs((prev) =>
-        prev.map((j) =>
-          j.id === jobId ? { ...j, [resultKey]: text, [loadingKey]: false } : j
-        )
-      );
-    } catch (e) {
-      console.error(e);
-      const resultKey = type === "summarize" ? "summary" : "tweet";
-      setJobs((prev) =>
-        prev.map((j) =>
-          j.id === jobId
-            ? { ...j, [resultKey]: "Erro na IA.", [loadingKey]: false }
-            : j
-        )
-      );
-    }
-  };
+  const handleRemoveJob = (id: string) => {};
 
   return (
     <main className="bg-gray-900 text-white min-h-screen font-sans p-4 sm:p-6 lg:p-8">
@@ -135,7 +99,7 @@ export const DownloaderPage: React.FC = () => {
             <Youtube className="h-10 w-10 text-red-600" />
             <div>
               <h1 className="text-3xl font-bold tracking-tight bg-gradient-to-r from-red-500 to-red-700 text-transparent bg-clip-text">
-                YT Downloader
+                AdVideo
               </h1>
             </div>
           </div>
@@ -203,7 +167,8 @@ export const DownloaderPage: React.FC = () => {
             </div>
           </form>
           <p className="text-xs text-center text-gray-500 mt-4">
-            Arquivos disponíveis por 24h. Recursos de IA ✨ por Gemini.
+            Arquivos disponíveis por 24h.
+            {/* Recursos de IA ✨ por Gemini. */}
           </p>
         </section>
 
@@ -218,7 +183,7 @@ export const DownloaderPage: React.FC = () => {
                   key={job.id}
                   job={job}
                   onRemove={handleRemoveJob}
-                  onGeminiAction={handleGeminiAction}
+                  // onGeminiAction={handleGeminiAction}
                 />
               ))}
             </div>

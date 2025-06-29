@@ -12,32 +12,46 @@ import {
 import { StatusBadge } from "../ui/StatusBadge";
 
 interface Job {
-  id: number;
+  id: string;
   title?: string;
   status: "queue" | "processing" | "complete" | "error";
   format: string;
   thumbnail?: string;
   downloadUrl?: string;
   completedAt?: number;
+  durationSeconds?: number;
   summary?: string;
   tweet?: string;
   isSummarizing?: boolean;
   isGeneratingTweet?: boolean;
 }
 
+export function formatSeconds(seconds: number): string {
+  const h = Math.floor(seconds / 3600)
+    .toString()
+    .padStart(2, "0");
+  const m = Math.floor((seconds % 3600) / 60)
+    .toString()
+    .padStart(2, "0");
+  const s = Math.floor(seconds % 60)
+    .toString()
+    .padStart(2, "0");
+
+  return `${h}:${m}:${s}`;
+}
+
 interface DownloadCardProps {
   job: Job;
-  onRemove: (id: number) => void;
-  onGeminiAction: (jobId: number, type: "summarize" | "tweet") => void;
+  onRemove: (id: string) => void;
+  // onGeminiAction: (jobId: number, type: "summarize" | "tweet") => void;
 }
 
 export const DownloadCard: React.FC<DownloadCardProps> = ({
   job,
   onRemove,
-  onGeminiAction,
+  // onGeminiAction,
 }) => {
   const [timeLeft, setTimeLeft] = useState("");
-  const [copied, setCopied] = useState<string | null>(null);
 
   useEffect(() => {
     if (job.status !== "complete" || !job.completedAt) return;
@@ -61,12 +75,6 @@ export const DownloadCard: React.FC<DownloadCardProps> = ({
     return () => clearInterval(id);
   }, [job.status, job.completedAt]);
 
-  const copy = (text: string, type: string) => {
-    navigator.clipboard.writeText(text);
-    setCopied(type);
-    setTimeout(() => setCopied(null), 2000);
-  };
-
   return (
     <div className="bg-gray-800/50 backdrop-blur-sm p-4 rounded-lg shadow-md flex flex-col gap-4 transition-all duration-500 animate-fade-in">
       <div className="flex flex-col md:flex-row items-center gap-4">
@@ -87,6 +95,11 @@ export const DownloadCard: React.FC<DownloadCardProps> = ({
               <Clapperboard className="h-4 w-4 text-gray-400" />
             ) : (
               <Music className="h-4 w-4 text-gray-400" />
+            )}
+            {job.durationSeconds && (
+              <span className="text-sm text-gray-400">
+                {formatSeconds(job.durationSeconds)}
+              </span>
             )}
           </div>
         </div>
@@ -120,7 +133,7 @@ export const DownloadCard: React.FC<DownloadCardProps> = ({
         </div>
       </div>
 
-      {job.status === "complete" && (
+      {/* {job.status === "complete" && (
         <div className="border-t border-gray-700 pt-4 mt-2">
           <div className="flex flex-col sm:flex-row gap-2">
             <button
@@ -187,7 +200,7 @@ export const DownloadCard: React.FC<DownloadCardProps> = ({
             </div>
           )}
         </div>
-      )}
+      )} */}
     </div>
   );
 };

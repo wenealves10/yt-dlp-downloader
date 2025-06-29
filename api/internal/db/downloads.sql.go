@@ -26,18 +26,19 @@ func (q *Queries) CountDownloadsByUser(ctx context.Context, userID uuid.UUID) (i
 
 const createDownload = `-- name: CreateDownload :one
 INSERT INTO downloads (
-  id, user_id, original_url, format, status, thumbnail_url, file_url, expires_at, duration_seconds, error_message
+  id, user_id, original_url, title, format, status, thumbnail_url, file_url, expires_at, duration_seconds, error_message
 )
 VALUES (
-  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
 )
-RETURNING id, user_id, original_url, format, status, thumbnail_url, file_url, expires_at, duration_seconds, error_message, created_at
+RETURNING id, user_id, original_url, title, format, status, thumbnail_url, file_url, expires_at, duration_seconds, error_message, created_at
 `
 
 type CreateDownloadParams struct {
 	ID              uuid.UUID          `json:"id"`
 	UserID          uuid.UUID          `json:"user_id"`
 	OriginalUrl     string             `json:"original_url"`
+	Title           string             `json:"title"`
 	Format          CoreFormatType     `json:"format"`
 	Status          CoreDownloadStatus `json:"status"`
 	ThumbnailUrl    pgtype.Text        `json:"thumbnail_url"`
@@ -52,6 +53,7 @@ func (q *Queries) CreateDownload(ctx context.Context, arg CreateDownloadParams) 
 		arg.ID,
 		arg.UserID,
 		arg.OriginalUrl,
+		arg.Title,
 		arg.Format,
 		arg.Status,
 		arg.ThumbnailUrl,
@@ -65,6 +67,7 @@ func (q *Queries) CreateDownload(ctx context.Context, arg CreateDownloadParams) 
 		&i.ID,
 		&i.UserID,
 		&i.OriginalUrl,
+		&i.Title,
 		&i.Format,
 		&i.Status,
 		&i.ThumbnailUrl,
@@ -88,7 +91,7 @@ func (q *Queries) DeleteDownload(ctx context.Context, id uuid.UUID) error {
 }
 
 const getDownloadByID = `-- name: GetDownloadByID :one
-SELECT id, user_id, original_url, format, status, thumbnail_url, file_url, expires_at, duration_seconds, error_message, created_at FROM downloads
+SELECT id, user_id, original_url, title, format, status, thumbnail_url, file_url, expires_at, duration_seconds, error_message, created_at FROM downloads
 WHERE id = $1
 `
 
@@ -99,6 +102,7 @@ func (q *Queries) GetDownloadByID(ctx context.Context, id uuid.UUID) (Download, 
 		&i.ID,
 		&i.UserID,
 		&i.OriginalUrl,
+		&i.Title,
 		&i.Format,
 		&i.Status,
 		&i.ThumbnailUrl,
@@ -112,7 +116,7 @@ func (q *Queries) GetDownloadByID(ctx context.Context, id uuid.UUID) (Download, 
 }
 
 const getDownloadsByUser = `-- name: GetDownloadsByUser :many
-SELECT id, user_id, original_url, format, status, thumbnail_url, file_url, expires_at, duration_seconds, error_message, created_at FROM downloads
+SELECT id, user_id, original_url, title, format, status, thumbnail_url, file_url, expires_at, duration_seconds, error_message, created_at FROM downloads
 WHERE user_id = $1
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3
@@ -137,6 +141,7 @@ func (q *Queries) GetDownloadsByUser(ctx context.Context, arg GetDownloadsByUser
 			&i.ID,
 			&i.UserID,
 			&i.OriginalUrl,
+			&i.Title,
 			&i.Format,
 			&i.Status,
 			&i.ThumbnailUrl,
@@ -163,19 +168,17 @@ SET
   file_url = $3,
   thumbnail_url = $4,
   expires_at = $5,
-  duration_seconds = $6,
-  error_message = $7
+  error_message = $6
 WHERE id = $1
 `
 
 type UpdateDownloadParams struct {
-	ID              uuid.UUID          `json:"id"`
-	Status          CoreDownloadStatus `json:"status"`
-	FileUrl         pgtype.Text        `json:"file_url"`
-	ThumbnailUrl    pgtype.Text        `json:"thumbnail_url"`
-	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
-	DurationSeconds pgtype.Int4        `json:"duration_seconds"`
-	ErrorMessage    pgtype.Text        `json:"error_message"`
+	ID           uuid.UUID          `json:"id"`
+	Status       CoreDownloadStatus `json:"status"`
+	FileUrl      pgtype.Text        `json:"file_url"`
+	ThumbnailUrl pgtype.Text        `json:"thumbnail_url"`
+	ExpiresAt    pgtype.Timestamptz `json:"expires_at"`
+	ErrorMessage pgtype.Text        `json:"error_message"`
 }
 
 func (q *Queries) UpdateDownload(ctx context.Context, arg UpdateDownloadParams) error {
@@ -185,7 +188,6 @@ func (q *Queries) UpdateDownload(ctx context.Context, arg UpdateDownloadParams) 
 		arg.FileUrl,
 		arg.ThumbnailUrl,
 		arg.ExpiresAt,
-		arg.DurationSeconds,
 		arg.ErrorMessage,
 	)
 	return err

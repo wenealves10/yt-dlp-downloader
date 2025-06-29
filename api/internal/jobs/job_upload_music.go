@@ -39,6 +39,7 @@ func (p *JobUploadMusic) ProcessTask(ctx context.Context, task *asynq.Task) erro
 	}
 
 	musicPathDest := fmt.Sprintf("uploads/musics/%s", payload.Filename)
+	bannerPathDest := fmt.Sprintf("uploads/banners/%s_banner.jpg", utils.GenerateUUIDString())
 
 	// Check if the download ID exists in the database
 	downloadID, err := utils.ParseUUID(payload.DownloadID)
@@ -55,14 +56,20 @@ func (p *JobUploadMusic) ProcessTask(ctx context.Context, task *asynq.Task) erro
 		return fmt.Errorf("failed to upload music file: %v: %w", err, asynq.SkipRetry)
 	}
 
+	if err := p.r2Storage.UploadFile(ctx, payload.BannerPath, bannerPathDest); err != nil {
+		return fmt.Errorf("failed to upload banner file: %v: %w", err,
+			asynq.SkipRetry)
+	}
+
 	expiredAt := time.Now().Add(24 * time.Hour)
 
 	// atualizar o download no banco de dados
 	if err := p.store.UpdateDownload(ctx, db.UpdateDownloadParams{
-		ID:        downloadID,
-		Status:    db.CoreDownloadStatusCOMPLETED,
-		FileUrl:   pgtype.Text{String: musicPathDest, Valid: true},
-		ExpiresAt: pgtype.Timestamptz{Time: expiredAt, Valid: true},
+		ID:           downloadID,
+		Status:       db.CoreDownloadStatusCOMPLETED,
+		ThumbnailUrl: pgtype.Text{String: bannerPathDest, Valid: true},
+		FileUrl:      pgtype.Text{String: musicPathDest, Valid: true},
+		ExpiresAt:    pgtype.Timestamptz{Time: expiredAt, Valid: true},
 	}); err != nil {
 		return fmt.Errorf("failed to update download: %v: %w", err, asynq.SkipRetry)
 	}
@@ -73,7 +80,7 @@ func (p *JobUploadMusic) ProcessTask(ctx context.Context, task *asynq.Task) erro
 		Status:       db.CoreDownloadStatusCOMPLETED,
 		FileUrl:      musicPathDest,
 		UserID:       downloadExists.UserID.String(),
-		ThumbnailUrl: "",
+		ThumbnailUrl: bannerPathDest,
 		ExpiresAt:    expiredAt,
 	}); err != nil {
 		log.Println("failed to publish download event:", err)
@@ -82,6 +89,10 @@ func (p *JobUploadMusic) ProcessTask(ctx context.Context, task *asynq.Task) erro
 	// Optionally, you can remove the local music file after uploading
 	if err := utils.RemoveFile(payload.MusicPath); err != nil {
 		return fmt.Errorf("failed to remove local video file: %v: %w", err, asynq.SkipRetry)
+	}
+
+	if err := utils.RemoveFile(payload.BannerPath); err != nil {
+		return fmt.Errorf("failed to remove local banner file: %v: %w", err, asynq.SkipRetry)
 	}
 
 	return nil

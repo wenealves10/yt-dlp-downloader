@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { Routes, Route } from "react-router-dom";
 import PrivateRoute from "./components/auth/PrivateRoute";
 import { DownloaderPage } from "./components/downloader/DownloaderPage";
 import { SettingsModal } from "./components/settings/SettingsModal";
@@ -8,23 +8,21 @@ import NotFound from "./components/notfound/NotFound";
 
 export const App = () => {
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/register" element={<RegistrationPage />} />
-        <Route path="/" element={<LoginPage />} />
+    <Routes>
+      <Route path="/register" element={<RegistrationPage />} />
+      <Route path="/" element={<LoginPage />} />
+      <Route element={<PrivateRoute />}>
         <Route
           path="/dashboard"
           element={
-            <PrivateRoute>
-              <>
-                <DownloaderPage />
-                <SettingsModal />
-              </>
-            </PrivateRoute>
+            <>
+              <DownloaderPage />
+              <SettingsModal />
+            </>
           }
         />
-        <Route path="*" element={<NotFound />} />
-      </Routes>
-    </BrowserRouter>
+      </Route>
+      <Route path="*" element={<NotFound />} />
+    </Routes>
   );
 };

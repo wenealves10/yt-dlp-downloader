@@ -1,9 +1,9 @@
 -- name: CreateDownload :one
 INSERT INTO downloads (
-  id, user_id, original_url, format, status, thumbnail_url, file_url, expires_at, duration_seconds, error_message
+  id, user_id, original_url, title, format, status, thumbnail_url, file_url, expires_at, duration_seconds, error_message
 )
 VALUES (
-  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
 )
 RETURNING *;
 
@@ -34,8 +34,7 @@ SET
   file_url = $3,
   thumbnail_url = $4,
   expires_at = $5,
-  duration_seconds = $6,
-  error_message = $7
+  error_message = $6
 WHERE id = $1;
 
 -- name: DeleteDownload :exec

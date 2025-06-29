@@ -64,12 +64,19 @@ export const SettingsModal: React.FC = () => {
               onSubmit={handleSaveProfile}
               className="space-y-4 animate-fade-in-fast"
             >
-              <div className="text-center mb-4">
-                <img
-                  src={user?.full_name}
-                  alt="Avatar"
-                  className="w-24 h-24 rounded-full mx-auto mb-2 border-2 border-red-500"
-                />
+              <div className="text-center mb-4 flex flex-col items-center">
+                {user?.profile_url && (
+                  <img
+                    src={user.full_name}
+                    alt="Avatar"
+                    className="w-24 h-24 rounded-full mx-auto mb-2 border-2 border-red-500"
+                  />
+                )}
+                {!user?.profile_url && (
+                  <div className="w-24 h-24 cursor-pointer rounded-full bg-gray-600 flex items-center justify-center text-white mb-2">
+                    {user?.full_name?.charAt(0).toUpperCase() || "U"}
+                  </div>
+                )}
                 <button
                   type="button"
                   className="text-sm text-red-400 hover:underline"

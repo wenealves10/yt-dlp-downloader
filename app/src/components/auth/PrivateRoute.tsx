@@ -1,36 +1,49 @@
-import { Navigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Navigate, Outlet } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuth";
-import { useQuery } from "@tanstack/react-query";
-import type React from "react";
 import Loading from "../loading/Loading";
 
-export default function PrivateRoute({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function PrivateRoute() {
   const { token, setUser } = useAuth();
-  const { data, isLoading, error } = useQuery({
-    queryKey: ["me"],
-    queryFn: async () => {
-      const res = await fetch("http://localhost:8080/v1/profile", {
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        method: "GET",
-      });
-      if (!res.ok) throw new Error("Not authenticated");
-      return res.json();
-    },
-  });
+  const [loading, setLoading] = useState(true);
+  const [isValid, setIsValid] = useState(false);
 
-  if (data) {
-    setUser(data);
-  }
+  useEffect(() => {
+    const verifyToken = async () => {
+      if (!token) {
+        setLoading(false);
+        return;
+      }
 
-  if (isLoading) <Loading />;
-  if (error) return <Navigate to="/" />;
+      try {
+        const response = await fetch("http://localhost:8080/v1/profile", {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+        });
 
-  return children;
+        if (response.ok) {
+          const userData = await response.json();
+          setUser(userData);
+          setIsValid(true);
+        } else {
+          localStorage.removeItem("authToken");
+        }
+      } catch (err) {
+        console.error("Erro ao verificar token:", err);
+        localStorage.removeItem("authToken");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    verifyToken();
+  }, [token, setUser]);
+
+  if (loading) return <Loading />;
+  if (!token || !isValid) return <Navigate to="/" replace />;
+
+  return <Outlet />;
 }

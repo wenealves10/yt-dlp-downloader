@@ -38,6 +38,10 @@ type Config struct {
 	ServerAddress       string        `mapstructure:"SERVER_ADDRESS"`
 	TokenPasetoKey      string        `mapstructure:"TOKEN_PASETO_KEY"`
 	AccessTokenDuration time.Duration `mapstructure:"ACCESS_TOKEN_DURATION"`
+
+	// # Proxy configuration
+	ProxyEnabled bool   `mapstructure:"PROXY_ENABLED"`
+	ProxyURL     string `mapstructure:"PROXY_URL"`
 }
 
 var LoadedConfig Config

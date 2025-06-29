@@ -5,17 +5,20 @@ import { App } from "./App.tsx";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthProvider } from "./contexts/AuthProvider.tsx";
 import { ModalConfigProvider } from "./contexts/ModalConfigProvider.tsx";
+import { BrowserRouter } from "react-router-dom";
 
 const queryClient = new QueryClient();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        <ModalConfigProvider>
-          <App />
-        </ModalConfigProvider>
-      </AuthProvider>
-    </QueryClientProvider>
+    <BrowserRouter>
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <ModalConfigProvider>
+            <App />
+          </ModalConfigProvider>
+        </AuthProvider>
+      </QueryClientProvider>
+    </BrowserRouter>
   </StrictMode>
 );

@@ -31,5 +31,5 @@ go.work.sum
 # .idea/
 # .vscode/
 *.acl
-uploads/videos
-uploads/musics
+*/uploads/videos
+*/uploads/musics

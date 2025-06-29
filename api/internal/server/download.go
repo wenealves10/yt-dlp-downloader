@@ -8,7 +8,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/hibiken/asynq"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/wenealves10/yt-dlp-downloader/internal/db"
+	"github.com/wenealves10/yt-dlp-downloader/internal/helpers"
 	"github.com/wenealves10/yt-dlp-downloader/internal/queues"
 	"github.com/wenealves10/yt-dlp-downloader/internal/tasks"
 	"github.com/wenealves10/yt-dlp-downloader/internal/tokens"
@@ -31,6 +33,7 @@ type downloadRequest struct {
 
 type downloadResponse struct {
 	ID              string                `json:"id"`
+	Title           string                `json:"title"`
 	OriginalUrl     string                `json:"original_url"`
 	Format          db.CoreFormatType     `json:"format"`
 	Status          db.CoreDownloadStatus `json:"status"`
@@ -57,11 +60,27 @@ func (s *Server) createDownload(ctx *gin.Context) {
 		return
 	}
 
+	videoInfo, err := helpers.GetVideoInfo(ctx, req.URL)
+	if err != nil {
+		log.Printf("Failed to get video info: %v", err)
+		ctx.JSON(400, gin.H{"error": "Invalid URL or unsupported format"})
+		return
+	}
+
 	downloadParams := db.CreateDownloadParams{
 		ID:          utils.GenerateUUID(),
 		UserID:      userID,
 		OriginalUrl: req.URL,
-		Status:      db.CoreDownloadStatusPENDING,
+		Title:       videoInfo.Title,
+		ThumbnailUrl: pgtype.Text{
+			String: videoInfo.Thumbnail,
+			Valid:  videoInfo.Thumbnail != "",
+		},
+		DurationSeconds: pgtype.Int4{
+			Int32: int32(videoInfo.Duration),
+			Valid: true,
+		},
+		Status: db.CoreDownloadStatusPENDING,
 	}
 
 	switch req.Type {
@@ -157,11 +176,17 @@ func (s *Server) getDownloads(ctx *gin.Context) {
 	var response []downloadResponse
 	for _, download := range downloads {
 		response = append(response, downloadResponse{
-			ID:          download.ID.String(),
-			Status:      download.Status,
-			OriginalUrl: download.OriginalUrl,
-			Format:      download.Format,
-			CreatedAt:   download.CreatedAt.Format(time.RFC3339),
+			ID:              download.ID.String(),
+			Title:           download.Title,
+			Status:          download.Status,
+			OriginalUrl:     download.OriginalUrl,
+			ThumbnailUrl:    download.ThumbnailUrl.String,
+			FileUrl:         download.FileUrl.String,
+			DurationSeconds: download.DurationSeconds.Int32,
+			ExpiresAt:       download.ExpiresAt.Time.Format(time.RFC3339),
+			ErrorMessage:    download.ErrorMessage.String,
+			Format:          download.Format,
+			CreatedAt:       download.CreatedAt.Format(time.RFC3339),
 		})
 	}
 

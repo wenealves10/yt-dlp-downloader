@@ -3,17 +3,20 @@ import { Youtube, Mail, Lock } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
 import { login, type LoginPayload } from "../../api/auth";
+import { useAuth } from "../../hooks/useAuth";
 
 export const LoginPage: React.FC = () => {
   const navigate = useNavigate();
+  const { login: loginContext } = useAuth(); // pegando a função login do contexto
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
   const loginMutation = useMutation({
     mutationFn: (payload: LoginPayload) => login(payload),
     onSuccess: (data) => {
-      localStorage.setItem("token", data.access_token);
-      navigate("/dashboard");
+      loginContext(data.access_token); // salva no contexto + localStorage
+      navigate("/dashboard"); // redireciona
     },
     onError: () => {
       alert("Email ou senha inválidos");
@@ -36,7 +39,7 @@ export const LoginPage: React.FC = () => {
             <Youtube className="h-12 w-12 text-red-600" />
             <div>
               <h1 className="text-4xl sm:text-5xl font-bold tracking-tight bg-gradient-to-r from-red-500 to-red-700 text-transparent bg-clip-text">
-                YT Downloader
+                AdVideo
               </h1>
               <p className="text-gray-400 mt-1">
                 Acesse sua conta para continuar
