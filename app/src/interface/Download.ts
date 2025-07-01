@@ -26,3 +26,9 @@ export interface DownloadsResponse {
   per_page: number;
   total: number;
 }
+
+export interface DailyDownloadsResponse {
+  daily_downloads: number;
+  daily_limit: number;
+  remaining: number;
+}

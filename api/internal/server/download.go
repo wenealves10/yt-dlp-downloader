@@ -199,3 +199,32 @@ func (s *Server) getDownloads(ctx *gin.Context) {
 		"downloads": response,
 	})
 }
+
+func (s *Server) getDailyDownloads(ctx *gin.Context) {
+	authPayload := ctx.MustGet(authorizationPayloadKey).(*tokens.Payload)
+	userID, err := utils.ParseUUID(authPayload.UserID)
+	if err != nil {
+		log.Printf("Failed to parse user ID: %v", err)
+		ctx.JSON(400, gin.H{"error": "Invalid user ID"})
+		return
+	}
+
+	user, err := s.store.GetUserByID(ctx.Request.Context(), userID)
+	if err != nil {
+		log.Printf("Failed to get user: %v", err)
+		ctx.JSON(500, gin.H{"error": "Failed to get user"})
+		return
+	}
+
+	dailyDownloads, err := s.store.CountDownloadsToday(ctx, userID)
+	if err != nil {
+		log.Printf("Failed to count daily downloads: %v", err)
+		ctx.JSON(500, gin.H{"error": "Failed to count daily downloads"})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{
+		"daily_downloads": dailyDownloads,
+		"daily_limit":     user.DailyLimit,
+		"remaining":       int64(user.DailyLimit) - dailyDownloads,
+	})
+}

@@ -10,9 +10,11 @@ import {
 import { UserMenu } from "../user/UserMenu";
 import { DownloadCard } from "./DownloadCard";
 import { useAuth } from "../../hooks/useAuth";
-import { useQuery } from "@tanstack/react-query";
-import { getData } from "../../api/getData";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { getDailyDownloads, getData } from "../../api/getData";
 import { bucketHost } from "../../constants/config";
+import { DownloadCounter } from "./DownloadCounter";
+import { useDownloadMutation } from "../../hooks/useDownloadMutation";
 
 interface Job {
   id: string;
@@ -48,21 +50,24 @@ export const DownloaderPage: React.FC = () => {
   const [url, setUrl] = useState("");
   const [format, setFormat] = useState("video");
   const [jobs, setJobs] = useState<Job[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
   const [page, setPage] = useState(1);
   const [perPage] = useState(10);
 
-  const query = useQuery({
+  const downloadsQuery = useQuery({
     queryKey: ["downloads", page, perPage],
     queryFn: () => getData(token || "")(perPage, page),
     refetchOnWindowFocus: false,
     enabled: !!token,
   });
 
+  // linha do mutation
+  const downloadMutation = useDownloadMutation();
+  const queryClient = useQueryClient();
+
   useEffect(() => {
-    if (query.data?.downloads) {
-      const mapped: Job[] = query.data.downloads.map((item) => ({
+    if (downloadsQuery.data?.downloads) {
+      const mapped: Job[] = downloadsQuery.data.downloads.map((item) => ({
         id: item.id,
         title: item.title,
         status: convertStatus(item.status),
@@ -75,7 +80,7 @@ export const DownloaderPage: React.FC = () => {
 
       setJobs(mapped);
     }
-  }, [query.data]);
+  }, [downloadsQuery.data]);
 
   const handleDownload = (e: React.FormEvent) => {
     e.preventDefault();
@@ -84,8 +89,19 @@ export const DownloaderPage: React.FC = () => {
       return;
     }
     setError("");
-    setIsLoading(true);
-    //
+    downloadMutation.mutate(
+      { url, type: format as "music" | "video" },
+      {
+        onSuccess: () => {
+          setUrl("");
+          downloadsQuery.refetch(); // atualiza lista de jobs
+          queryClient.invalidateQueries({ queryKey: ["downloadsDaily"] });
+        },
+        onError: () => {
+          setError("Erro ao processar o download.");
+        },
+      }
+    );
     setUrl("");
   };
 
@@ -103,7 +119,10 @@ export const DownloaderPage: React.FC = () => {
               </h1>
             </div>
           </div>
-          <UserMenu user={user} onLogout={logout} />
+          <div className="flex items-center gap-4">
+            <DownloadCounter />
+            <UserMenu user={user} onLogout={logout} />
+          </div>
         </header>
 
         <section className="bg-gray-800 p-6 rounded-xl shadow-2xl border border-gray-700">
@@ -151,10 +170,10 @@ export const DownloaderPage: React.FC = () => {
               </div>
               <button
                 type="submit"
-                disabled={isLoading || !url}
+                disabled={downloadMutation.isPending || !url}
                 className="w-full sm:w-auto flex-shrink-0 flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 text-white font-bold py-2.5 px-6 rounded-lg transition-all disabled:bg-red-800 disabled:cursor-not-allowed"
               >
-                {isLoading ? (
+                {downloadMutation.isPending ? (
                   <>
                     <Loader className="animate-spin" size={20} /> Processando...
                   </>
@@ -175,7 +194,7 @@ export const DownloaderPage: React.FC = () => {
         {jobs.length > 0 && (
           <section className="mt-8">
             <h2 className="text-2xl font-semibold mb-4 text-gray-300">
-              Fila de Processamento
+              Downloads Recentes
             </h2>
             <div className="space-y-4">
               {jobs.map((job) => (

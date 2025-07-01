@@ -80,7 +80,8 @@ export const DownloadCard: React.FC<DownloadCardProps> = ({
       <div className="flex flex-col md:flex-row items-center gap-4">
         <img
           src={
-            job.thumbnail || "https://placehold.co/120x90/1f2937/4b5563?text=YT"
+            job?.thumbnail ||
+            "https://placehold.co/120x90/1f2937/4b5563?text=YT"
           }
           alt="Thumbnail"
           className="w-32 h-auto object-cover rounded-md flex-shrink-0"
@@ -91,7 +92,7 @@ export const DownloadCard: React.FC<DownloadCardProps> = ({
           </p>
           <div className="flex items-center justify-center md:justify-start gap-2 mt-2">
             <StatusBadge status={job.status} />
-            {job.format === "video" ? (
+            {job.format === "mp4" ? (
               <Clapperboard className="h-4 w-4 text-gray-400" />
             ) : (
               <Music className="h-4 w-4 text-gray-400" />

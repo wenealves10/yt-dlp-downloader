@@ -34,6 +34,11 @@ type userResponse struct {
 
 func newUserResponse(user db.User) userResponse {
 	return userResponse{
+		ID:                user.ID,
+		PhotoUrl:          user.PhotoUrl.String,
+		Plan:              string(user.Plan),
+		DailyLimit:        user.DailyLimit,
+		IsVerified:        user.IsVerified,
 		FullName:          user.FullName,
 		Email:             user.Email,
 		PasswordChangedAt: user.PasswordChangedAt,

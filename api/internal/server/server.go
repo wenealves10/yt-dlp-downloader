@@ -81,6 +81,7 @@ func (server *Server) setupRouter() {
 
 	// downloads routes
 	authRoutes.GET("/downloads", server.getDownloads)
+	authRoutes.GET("/downloads/daily", server.getDailyDownloads)
 	authLimitedRoutes.POST("/downloads", server.createDownload)
 
 	server.router = router
