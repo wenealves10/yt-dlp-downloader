@@ -1,26 +1,11 @@
 import React from "react";
-import { useQuery } from "@tanstack/react-query";
 import { Download } from "lucide-react";
-import { useAuth } from "../../hooks/useAuth";
-import { getDailyDownloads } from "../../api/getData";
+import { useDownloads } from "../../hooks/useDownload";
 
 export const DownloadCounter: React.FC = () => {
-  const { token, user } = useAuth();
+  const { remaining, limit, loading, error } = useDownloads();
 
-  const {
-    data: downloadsDaily,
-    isLoading,
-    isError,
-  } = useQuery({
-    queryKey: ["downloadsDaily"],
-    queryFn: () => getDailyDownloads(token || "")(),
-    refetchOnWindowFocus: false,
-    enabled: !!token,
-  });
-
-  if (!token || !user?.daily_limit) return null;
-
-  if (isLoading) {
+  if (loading) {
     return (
       <div className="flex items-center gap-2 text-sm text-gray-400 animate-pulse">
         <Download className="w-4 h-4 text-gray-500" />
@@ -29,7 +14,7 @@ export const DownloadCounter: React.FC = () => {
     );
   }
 
-  if (isError || !downloadsDaily) {
+  if (error || remaining === null || limit === null) {
     return (
       <div className="flex items-center gap-2 text-sm text-red-400">
         <Download className="w-4 h-4" />
@@ -38,10 +23,7 @@ export const DownloadCounter: React.FC = () => {
     );
   }
 
-  const remaining = downloadsDaily.remaining;
-  const current = remaining < 0 ? 0 : remaining;
-  const limit = user.daily_limit;
-  const isLow = current <= 1;
+  const isLow = remaining <= 1;
 
   return (
     <div className="flex items-center gap-2 text-sm text-gray-400">
@@ -53,7 +35,7 @@ export const DownloadCounter: React.FC = () => {
             isLow ? "text-red-400 font-semibold" : "text-white font-medium"
           }
         >
-          {current}
+          {remaining}
         </span>{" "}
         de <span className="text-white font-medium">{limit}</span> downloads
         hoje.

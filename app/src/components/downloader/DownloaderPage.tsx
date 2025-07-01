@@ -11,10 +11,11 @@ import { UserMenu } from "../user/UserMenu";
 import { DownloadCard } from "./DownloadCard";
 import { useAuth } from "../../hooks/useAuth";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { getDailyDownloads, getData } from "../../api/getData";
+import { getData } from "../../api/getData";
 import { bucketHost } from "../../constants/config";
 import { DownloadCounter } from "./DownloadCounter";
 import { useDownloadMutation } from "../../hooks/useDownloadMutation";
+import { useDownloads } from "../../hooks/useDownload";
 
 interface Job {
   id: string;
@@ -25,6 +26,7 @@ interface Job {
   downloadUrl?: string;
   durationSeconds?: number;
   completedAt?: number;
+  expiresAt?: string | null;
   summary?: string;
   tweet?: string;
   isSummarizing?: boolean;
@@ -53,6 +55,7 @@ export const DownloaderPage: React.FC = () => {
   const [error, setError] = useState("");
   const [page, setPage] = useState(1);
   const [perPage] = useState(10);
+  const { remaining, refetch } = useDownloads();
 
   const downloadsQuery = useQuery({
     queryKey: ["downloads", page, perPage],
@@ -61,9 +64,7 @@ export const DownloaderPage: React.FC = () => {
     enabled: !!token,
   });
 
-  // linha do mutation
   const downloadMutation = useDownloadMutation();
-  const queryClient = useQueryClient();
 
   useEffect(() => {
     if (downloadsQuery.data?.downloads) {
@@ -73,11 +74,13 @@ export const DownloaderPage: React.FC = () => {
         status: convertStatus(item.status),
         durationSeconds: item.duration_seconds,
         format: item.format.toLowerCase(),
-        thumbnail: `${bucketHost}/${item.thumbnail_url}`,
+        thumbnail: item.thumbnail_url?.includes("http")
+          ? ""
+          : `${bucketHost}/${item.thumbnail_url}`,
         downloadUrl: `${bucketHost}/${item.file_url}`,
         completedAt: new Date(item.created_at).getTime(),
+        expiresAt: item.expires_at,
       }));
-
       setJobs(mapped);
     }
   }, [downloadsQuery.data]);
@@ -94,8 +97,8 @@ export const DownloaderPage: React.FC = () => {
       {
         onSuccess: () => {
           setUrl("");
-          downloadsQuery.refetch(); // atualiza lista de jobs
-          queryClient.invalidateQueries({ queryKey: ["downloadsDaily"] });
+          downloadsQuery.refetch();
+          refetch();
         },
         onError: () => {
           setError("Erro ao processar o download.");
@@ -136,8 +139,13 @@ export const DownloaderPage: React.FC = () => {
                   setUrl(e.target.value);
                   setError("");
                 }}
+                disabled={remaining === 0}
                 placeholder="Cole o link do YouTube aqui..."
-                className="w-full bg-gray-900 border border-gray-600 rounded-lg py-3 pl-10 pr-4 focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all placeholder-gray-500"
+                className={`w-full bg-gray-900 border border-gray-600 rounded-lg py-3 pl-10 pr-4 focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all placeholder-gray-500 
+                    ${
+                      remaining === 0 ? "opacity-50 cursor-not-allowed" : ""
+                    }                  
+                  `}
               />
             </div>
             {error && <p className="text-red-400 text-sm mb-4">{error}</p>}
@@ -187,7 +195,6 @@ export const DownloaderPage: React.FC = () => {
           </form>
           <p className="text-xs text-center text-gray-500 mt-4">
             Arquivos disponíveis por 24h.
-            {/* Recursos de IA ✨ por Gemini. */}
           </p>
         </section>
 
@@ -202,7 +209,6 @@ export const DownloaderPage: React.FC = () => {
                   key={job.id}
                   job={job}
                   onRemove={handleRemoveJob}
-                  // onGeminiAction={handleGeminiAction}
                 />
               ))}
             </div>

@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthProvider } from "./contexts/AuthProvider.tsx";
 import { ModalConfigProvider } from "./contexts/ModalConfigProvider.tsx";
 import { BrowserRouter } from "react-router-dom";
+import { DownloadProvider } from "./contexts/DownloadProvider.tsx";
 
 const queryClient = new QueryClient();
 
@@ -15,7 +16,9 @@ createRoot(document.getElementById("root")!).render(
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
           <ModalConfigProvider>
-            <App />
+            <DownloadProvider>
+              <App />
+            </DownloadProvider>
           </ModalConfigProvider>
         </AuthProvider>
       </QueryClientProvider>
