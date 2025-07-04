@@ -11,17 +11,19 @@ import (
 	"github.com/wenealves10/yt-dlp-downloader/internal/configs"
 	"github.com/wenealves10/yt-dlp-downloader/internal/db"
 	"github.com/wenealves10/yt-dlp-downloader/internal/tokens"
+	"github.com/wenealves10/yt-dlp-downloader/pkg/sse"
 )
 
 type Server struct {
 	config       configs.Config
 	store        db.Store
 	queueClient  *asynq.Client
+	sseManager   *sse.SSEManager
 	tokenCreator tokens.TokenCreator
 	router       *gin.Engine
 }
 
-func NewServer(config configs.Config, store db.Store, queueClient *asynq.Client) (*Server, error) {
+func NewServer(config configs.Config, store db.Store, queueClient *asynq.Client, sseManager *sse.SSEManager) (*Server, error) {
 
 	tokenCreator, err := tokens.NewPasetoTokenCreator(config.TokenPasetoKey)
 	if err != nil {
@@ -33,6 +35,7 @@ func NewServer(config configs.Config, store db.Store, queueClient *asynq.Client)
 		tokenCreator: tokenCreator,
 		config:       config,
 		queueClient:  queueClient,
+		sseManager:   sseManager,
 	}
 
 	if v, ok := binding.Validator.Engine().(*validator.Validate); ok {
@@ -83,6 +86,9 @@ func (server *Server) setupRouter() {
 	authRoutes.GET("/downloads", server.getDownloads)
 	authRoutes.GET("/downloads/daily", server.getDailyDownloads)
 	authLimitedRoutes.POST("/downloads", server.createDownload)
+
+	// SSE route
+	groupV1.GET("/sse", server.sseHandler())
 
 	server.router = router
 }

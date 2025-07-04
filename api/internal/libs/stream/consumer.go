@@ -2,33 +2,39 @@ package stream
 
 import (
 	"context"
-	"encoding/json"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 )
 
 type EventConsumer interface {
-	Consume(ctx context.Context, ch chan<- DownloadEvent)
+	Consume(ctx context.Context, ch chan<- string)
 }
 
 type RedisConsumer struct {
-	client   *redis.Client
-	group    string
-	consumer string
+	client     *redis.Client
+	group      string
+	consumer   string
+	streamName string
 }
 
-func NewRedisConsumer(client *redis.Client, group, consumer string) EventConsumer {
-	return &RedisConsumer{client, group, consumer}
+func NewRedisConsumer(client *redis.Client, group, consumer, streamName string) EventConsumer {
+	err := client.XGroupCreateMkStream(context.Background(), streamName, group, "$").Err()
+	if err != nil && err != redis.Nil && !strings.Contains(err.Error(), "BUSYGROUP") {
+		log.Fatalf("erro ao criar grupo de consumo: %v", err)
+	}
+
+	return &RedisConsumer{client, group, consumer, streamName}
 }
 
-func (r *RedisConsumer) Consume(ctx context.Context, ch chan<- DownloadEvent) {
+func (r *RedisConsumer) Consume(ctx context.Context, ch chan<- string) {
 	for {
 		streams, err := r.client.XReadGroup(ctx, &redis.XReadGroupArgs{
 			Group:    r.group,
 			Consumer: r.consumer,
-			Streams:  []string{StreamName, ">"},
+			Streams:  []string{r.streamName, ">"},
 			Block:    5 * time.Second,
 		}).Result()
 
@@ -43,13 +49,7 @@ func (r *RedisConsumer) Consume(ctx context.Context, ch chan<- DownloadEvent) {
 		for _, stream := range streams {
 			for _, msg := range stream.Messages {
 				raw := msg.Values["payload"].(string)
-				var event DownloadEvent
-				if err := json.Unmarshal([]byte(raw), &event); err != nil {
-					log.Println("erro ao desserializar evento:", err)
-					continue
-				}
-				ch <- event
-
+				ch <- raw
 				// Marca como processado
 				r.client.XAck(ctx, StreamName, r.group, msg.ID)
 			}

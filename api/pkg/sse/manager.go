@@ -16,7 +16,7 @@ func NewSSEManager() *SSEManager {
 }
 
 func (m *SSEManager) Subscribe(id string) Subscriber {
-	ch := make(Subscriber, 10)
+	ch := make(Subscriber, 100)
 	m.mu.Lock()
 	m.subscribers[id] = append(m.subscribers[id], ch)
 	m.mu.Unlock()

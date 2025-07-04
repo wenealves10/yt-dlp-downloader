@@ -74,11 +74,11 @@ func (p *JobUploadVideo) ProcessTask(ctx context.Context, task *asynq.Task) erro
 	}
 
 	// Publish the event to the Redis stream
-	if err := p.rdStream.Publish(ctx, stream.DownloadEvent{
+	if err := p.rdStream.Publish(ctx, stream.StreamName, stream.DownloadEvent{
 		ID:           payload.DownloadID,
+		UserID:       downloadExists.UserID.String(),
 		Status:       db.CoreDownloadStatusCOMPLETED,
 		FileUrl:      videoPathDest,
-		UserID:       downloadExists.UserID.String(),
 		ThumbnailUrl: bannerPathDest,
 		ExpiresAt:    expiredAt,
 	}); err != nil {

@@ -10,12 +10,14 @@ import {
 import { UserMenu } from "../user/UserMenu";
 import { DownloadCard } from "./DownloadCard";
 import { useAuth } from "../../hooks/useAuth";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { getData } from "../../api/getData";
 import { bucketHost } from "../../constants/config";
 import { DownloadCounter } from "./DownloadCounter";
 import { useDownloadMutation } from "../../hooks/useDownloadMutation";
 import { useDownloads } from "../../hooks/useDownload";
+import type { Download as DownloadType } from "../../interface/Download";
+const apiUrl = import.meta.env.VITE_API_URL;
 
 interface Job {
   id: string;
@@ -36,6 +38,7 @@ interface Job {
 function convertStatus(apiStatus: string): Job["status"] {
   switch (apiStatus) {
     case "PENDING":
+      return "queue";
     case "PROCESSING":
       return "processing";
     case "COMPLETED":
@@ -84,6 +87,42 @@ export const DownloaderPage: React.FC = () => {
       setJobs(mapped);
     }
   }, [downloadsQuery.data]);
+
+  useEffect(() => {
+    const eventSource = new EventSource(`${apiUrl}/v1/sse?token=${token}`);
+
+    eventSource.onmessage = (event) => {
+      console.log("Mensagem SSE:", event.data);
+      const data: DownloadType = JSON.parse(event.data);
+      setJobs((prev) => {
+        const existingIndex = prev.findIndex((job) => job.id === data.id);
+        if (existingIndex !== -1) {
+          const updatedJobs = [...prev];
+          updatedJobs[existingIndex] = {
+            ...updatedJobs[existingIndex],
+            ...data,
+            status: convertStatus(data.status),
+            thumbnail: data?.thumbnail_url
+              ? `${bucketHost}/${data.thumbnail_url}`
+              : updatedJobs[existingIndex].thumbnail,
+            downloadUrl: data?.file_url ? `${bucketHost}/${data.file_url}` : "",
+            expiresAt: data.expires_at || updatedJobs[existingIndex].expiresAt,
+          };
+          return updatedJobs;
+        }
+        return [...prev, { ...data, status: convertStatus(data.status) }];
+      });
+    };
+
+    eventSource.onerror = (err) => {
+      console.error("Erro SSE:", err);
+      eventSource.close();
+    };
+
+    return () => {
+      eventSource.close();
+    };
+  }, []);
 
   const handleDownload = (e: React.FormEvent) => {
     e.preventDefault();

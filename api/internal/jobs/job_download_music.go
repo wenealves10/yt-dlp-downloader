@@ -59,7 +59,7 @@ func (p *JobDownloadMusic) ProcessTask(ctx context.Context, task *asynq.Task) er
 		return fmt.Errorf("failed to update download status: %v", err)
 	}
 
-	if err := p.rdStream.Publish(ctx, stream.DownloadEvent{
+	if err := p.rdStream.Publish(ctx, stream.StreamName, stream.DownloadEvent{
 		ID:     downloadExists.ID.String(),
 		UserID: downloadExists.UserID.String(),
 		Status: db.CoreDownloadStatusPROCESSING,

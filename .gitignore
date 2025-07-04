@@ -33,3 +33,4 @@ go.work.sum
 *.acl
 */uploads/videos
 */uploads/musics
+*/bin/*

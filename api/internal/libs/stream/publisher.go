@@ -9,7 +9,7 @@ import (
 )
 
 type EventPublisher interface {
-	Publish(ctx context.Context, event DownloadEvent) error
+	Publish(ctx context.Context, streamName string, payload any) error
 }
 
 type RedisPublisher struct {
@@ -20,14 +20,14 @@ func NewRedisPublisher(client *redis.Client) EventPublisher {
 	return &RedisPublisher{client: client}
 }
 
-func (r *RedisPublisher) Publish(ctx context.Context, event DownloadEvent) error {
-	data, err := json.Marshal(event)
+func (r *RedisPublisher) Publish(ctx context.Context, streamName string, payload any) error {
+	data, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("erro ao serializar evento: %w", err)
 	}
 
 	return r.client.XAdd(ctx, &redis.XAddArgs{
-		Stream: StreamName,
+		Stream: streamName,
 		Values: map[string]any{
 			"payload": data,
 		},
