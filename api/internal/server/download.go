@@ -228,3 +228,55 @@ func (s *Server) getDailyDownloads(ctx *gin.Context) {
 		"remaining":       int64(user.DailyLimit) - dailyDownloads,
 	})
 }
+
+func (s *Server) deleteDownload(ctx *gin.Context) {
+	authPayload := ctx.MustGet(authorizationPayloadKey).(*tokens.Payload)
+	userID, err := utils.ParseUUID(authPayload.UserID)
+	if err != nil {
+		log.Printf("Failed to parse user ID: %v", err)
+		ctx.JSON(400, gin.H{"error": "Invalid user ID"})
+		return
+	}
+
+	downloadID := ctx.Param("id")
+	if downloadID == "" {
+		ctx.JSON(400, gin.H{"error": "Download ID is required"})
+		return
+	}
+
+	downloadIDParsed, err := utils.ParseUUID(downloadID)
+	if err != nil {
+		log.Printf("Failed to parse download ID: %v", err)
+		ctx.JSON(400, gin.H{"error": "Invalid download ID"})
+		return
+	}
+
+	downloadExists, err := s.store.GetDownloadByID(ctx, downloadIDParsed)
+	if err != nil {
+		log.Printf("Not found download: %v\n", err)
+		ctx.JSON(404, gin.H{"error": "Download not found"})
+		return
+	}
+
+	if downloadExists.UserID != userID {
+		log.Printf("Unauthorized access to download: %s by user: %s", downloadID, userID)
+		ctx.JSON(403, gin.H{"error": "You do not have permission to delete this download"})
+		return
+	}
+
+	if err := s.store.DeleteDownload(ctx, downloadIDParsed); err != nil {
+		log.Printf("Failed to delete download: %v", err)
+		ctx.JSON(500, gin.H{"error": "Failed to delete download"})
+		return
+	}
+
+	if err := s.storage.DeleteFile(ctx, downloadExists.ThumbnailUrl.String); err != nil {
+		log.Printf("Failed to delete thumbnail from storage: %v", err)
+	}
+
+	if err := s.storage.DeleteFile(ctx, downloadExists.FileUrl.String); err != nil {
+		log.Printf("Failed to delete file from storage: %v", err)
+	}
+
+	ctx.JSON(http.StatusNoContent, gin.H{})
+}

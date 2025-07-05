@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
@@ -70,28 +71,30 @@ func main() {
 
 	rdStream := stream.NewRedisPublisher(rdb)
 
+	asynqRedisOpt := asynq.RedisClientOpt{
+		Addr:     redisAddr,
+		Username: cg.RedisUsername,
+		Password: cg.RedisPassword,
+	}
+
 	srv := asynq.NewServer(
-		asynq.RedisClientOpt{
-			Addr:     redisAddr,
-			Username: cg.RedisUsername,
-			Password: cg.RedisPassword,
-		},
+		asynqRedisOpt,
 		asynq.Config{
 			Concurrency: queues.Concurrency,
 			Queues: map[string]int{
-				queues.TypeDownloadVideoQueue: queues.ConcurrencyDownloadVideo,
-				queues.TypeDownloadMusicQueue: queues.ConcurrencyDownloadMusic,
-				queues.TypeUploadVideoQueue:   queues.ConcurrencyUploadVideo,
-				queues.TypeUploadMusicQueue:   queues.ConcurrencyUploadMusic,
+				queues.TypeDownloadVideoQueue:      queues.ConcurrencyDownloadVideo,
+				queues.TypeDownloadMusicQueue:      queues.ConcurrencyDownloadMusic,
+				queues.TypeUploadVideoQueue:        queues.ConcurrencyUploadVideo,
+				queues.TypeUploadMusicQueue:        queues.ConcurrencyUploadMusic,
+				queues.TypeDownloadExpirationQueue: queues.ConcurrencyFileExpiration,
+				queues.TypeDeleteDownloadQueue:     queues.ConcurrencyDeleteDownload,
 			},
 		},
 	)
 
-	asynqClient := asynq.NewClient(asynq.RedisClientOpt{
-		Addr:     redisAddr,
-		Username: cg.RedisUsername,
-		Password: cg.RedisPassword,
-	})
+	go startScheduledTasks(asynqRedisOpt)
+
+	asynqClient := asynq.NewClient(asynqRedisOpt)
 	defer asynqClient.Close()
 
 	mux := asynq.NewServeMux()
@@ -99,9 +102,39 @@ func main() {
 	mux.Handle(tasks.TypeDownloadMusic, jobs.NewJobDownloadMusic(asynqClient, store, rdStream))
 	mux.Handle(tasks.TypeUploadVideo, jobs.NewJobUploadVideo(asynqClient, r2Storage, store, rdStream))
 	mux.Handle(tasks.TypeUploadMusic, jobs.NewJobUploadMusic(asynqClient, r2Storage, store, rdStream))
+	mux.Handle(tasks.TypeDeleteDownload, jobs.NewJobDeleteDownload(asynqClient, r2Storage, store))
+	mux.Handle(tasks.TypeDownloadExpiration, jobs.NewJobDownloadExpiration(asynqClient, store))
 	log.Printf("Starting worker server on %s", redisAddr)
 
 	if err := srv.Run(mux); err != nil {
 		log.Fatalf("could not run server: %v", err)
+	}
+}
+
+func startScheduledTasks(redisOpt asynq.RedisClientOpt) {
+	loc, err := time.LoadLocation("America/Sao_Paulo")
+	if err != nil {
+		panic(err)
+	}
+	scheduler := asynq.NewScheduler(
+		redisOpt,
+		&asynq.SchedulerOpts{
+			Location: loc,
+		},
+	)
+
+	task, err := tasks.NewDownloadExpirationTask()
+	if err != nil {
+		log.Fatalf("failed to create download expiration task: %v", err)
+	}
+
+	entryID, err := scheduler.Register("*/5 * * * *", task, asynq.Queue(queues.TypeDownloadExpirationQueue))
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	log.Println("⏱️ Scheduler iniciado...", "Entry ID:", entryID)
+	if err := scheduler.Run(); err != nil {
+		log.Fatalf("could not run scheduler: %v", err)
 	}
 }

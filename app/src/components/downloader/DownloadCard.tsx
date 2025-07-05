@@ -1,5 +1,13 @@
 import React, { useState, useEffect } from "react";
-import { Clapperboard, Music, Download, Trash2 } from "lucide-react";
+import { Button, Modal, ModalBody, ModalHeader } from "flowbite-react";
+import {
+  Clapperboard,
+  Music,
+  Download,
+  Trash2,
+  X,
+  TriangleAlert,
+} from "lucide-react";
 import { StatusBadge } from "../ui/StatusBadge";
 
 interface Job {
@@ -42,6 +50,7 @@ export const DownloadCard: React.FC<DownloadCardProps> = ({
   onRemove,
 }) => {
   const [timeLeft, setTimeLeft] = useState("");
+  const [openModal, setOpenModal] = useState(false);
 
   useEffect(() => {
     if (job.status !== "complete" || !job.expiresAt) return;
@@ -119,12 +128,53 @@ export const DownloadCard: React.FC<DownloadCardProps> = ({
           )}
           {job.status !== "queue" && job.status !== "processing" && (
             <button
-              onClick={() => onRemove(job.id)}
+              onClick={() => setOpenModal(true)}
               className="text-gray-500 hover:text-red-500 transition-colors"
             >
               <Trash2 size={16} />
             </button>
           )}
+          <Modal
+            show={openModal}
+            size="md"
+            onClose={() => setOpenModal(false)}
+            popup
+          >
+            <ModalBody className="bg-gray-800 p-6 rounded-md relative">
+              <Button
+                color="alternative"
+                className="absolute top-2 right-2"
+                onClick={() => setOpenModal(false)}
+              >
+                <X className="h-5 w-5" />
+              </Button>
+              <div className="text-center">
+                <TriangleAlert className="mx-auto mb-4 h-14 w-14 text-gray-400 dark:text-gray-200" />
+                <h3 className="mb-5 text-lg font-normal text-gray-500 dark:text-gray-400">
+                  Tem certeza que deseja excluir este download?
+                  <br />
+                  Esta ação não pode ser desfeita.
+                </h3>
+                <div className="flex justify-center gap-4">
+                  <Button
+                    color="red"
+                    onClick={() => {
+                      onRemove(job.id);
+                      setOpenModal(false);
+                    }}
+                  >
+                    Sim, tenho certeza
+                  </Button>
+                  <Button
+                    color="alternative"
+                    onClick={() => setOpenModal(false)}
+                  >
+                    Não, cancelar
+                  </Button>
+                </div>
+              </div>
+            </ModalBody>
+          </Modal>
         </div>
       </div>
     </div>

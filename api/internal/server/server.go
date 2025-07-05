@@ -10,6 +10,7 @@ import (
 	"github.com/hibiken/asynq"
 	"github.com/wenealves10/yt-dlp-downloader/internal/configs"
 	"github.com/wenealves10/yt-dlp-downloader/internal/db"
+	"github.com/wenealves10/yt-dlp-downloader/internal/libs/storage"
 	"github.com/wenealves10/yt-dlp-downloader/internal/tokens"
 	"github.com/wenealves10/yt-dlp-downloader/pkg/sse"
 )
@@ -17,13 +18,14 @@ import (
 type Server struct {
 	config       configs.Config
 	store        db.Store
+	storage      storage.Storage
 	queueClient  *asynq.Client
 	sseManager   *sse.SSEManager
 	tokenCreator tokens.TokenCreator
 	router       *gin.Engine
 }
 
-func NewServer(config configs.Config, store db.Store, queueClient *asynq.Client, sseManager *sse.SSEManager) (*Server, error) {
+func NewServer(config configs.Config, store db.Store, queueClient *asynq.Client, sseManager *sse.SSEManager, storage storage.Storage) (*Server, error) {
 
 	tokenCreator, err := tokens.NewPasetoTokenCreator(config.TokenPasetoKey)
 	if err != nil {
@@ -36,6 +38,7 @@ func NewServer(config configs.Config, store db.Store, queueClient *asynq.Client,
 		config:       config,
 		queueClient:  queueClient,
 		sseManager:   sseManager,
+		storage:      storage,
 	}
 
 	if v, ok := binding.Validator.Engine().(*validator.Validate); ok {
@@ -85,6 +88,7 @@ func (server *Server) setupRouter() {
 	// downloads routes
 	authRoutes.GET("/downloads", server.getDownloads)
 	authRoutes.GET("/downloads/daily", server.getDailyDownloads)
+	authRoutes.DELETE("/downloads/:id", server.deleteDownload)
 	authLimitedRoutes.POST("/downloads", server.createDownload)
 
 	// SSE route

@@ -6,44 +6,66 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go/aws"
 	"github.com/hibiken/asynq"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 	"github.com/wenealves10/yt-dlp-downloader/internal/configs"
 	"github.com/wenealves10/yt-dlp-downloader/internal/db"
+	"github.com/wenealves10/yt-dlp-downloader/internal/libs/storage/r2"
 	"github.com/wenealves10/yt-dlp-downloader/internal/libs/stream"
 	"github.com/wenealves10/yt-dlp-downloader/internal/server"
 	"github.com/wenealves10/yt-dlp-downloader/pkg/sse"
 )
 
 func main() {
-	config, err := configs.LoadConfig(".")
+	cg, err := configs.LoadConfig(".")
 	if err != nil {
 		log.Fatalf("cannot load config: %v", err)
 	}
 
 	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, config.DBSource)
+	pool, err := pgxpool.New(ctx, cg.DBSource)
 	if err != nil {
 		log.Fatal("Erro ao conectar no banco:", err)
 	}
 	defer pool.Close()
-
 	store := db.NewStore(pool)
 
-	redisAddr := fmt.Sprintf("%s:%s", config.RedisHost, config.RedisPort)
+	accessKeyId := cg.AccessKeyID
+	accessKeySecret := cg.SecretAccessKey
+	region := cg.Region
+	endpoint := cg.EndpointURL
+	bucketName := cg.BucketName
+
+	cfg, err := config.LoadDefaultConfig(context.TODO(),
+		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(accessKeyId, accessKeySecret, "")),
+		config.WithRegion(region),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	s3Client := s3.NewFromConfig(cfg, func(o *s3.Options) {
+		o.BaseEndpoint = aws.String(endpoint)
+	})
+	r2Storage := r2.NewS3Service(s3Client, bucketName)
+
+	redisAddr := fmt.Sprintf("%s:%s", cg.RedisHost, cg.RedisPort)
 	asynqClient := asynq.NewClient(asynq.RedisClientOpt{
 		Addr:     redisAddr,
-		Username: config.RedisUsername,
-		Password: config.RedisPassword,
+		Username: cg.RedisUsername,
+		Password: cg.RedisPassword,
 	})
 	defer asynqClient.Close()
 
-	// Initialize the Redis client
 	rdb := redis.NewClient(&redis.Options{
 		Addr:     redisAddr,
-		Username: config.RedisUsername,
-		Password: config.RedisPassword,
+		Username: cg.RedisUsername,
+		Password: cg.RedisPassword,
 	})
 	if err := rdb.Ping(ctx).Err(); err != nil {
 		log.Fatalf("could not connect to Redis: %v", err)
@@ -56,7 +78,6 @@ func main() {
 	var chDownloads = make(chan string, 100)
 	go rdStream.Consume(ctx, chDownloads)
 
-	// Start a goroutine to handle SSE events
 	go func() {
 		for msg := range chDownloads {
 			var event stream.DownloadEvent
@@ -69,12 +90,12 @@ func main() {
 		}
 	}()
 
-	api, err := server.NewServer(config, store, asynqClient, sseManager)
+	api, err := server.NewServer(cg, store, asynqClient, sseManager, r2Storage)
 	if err != nil {
 		log.Fatalf("cannot create server: %v", err)
 	}
 
-	if err := api.Start(config.ServerAddress); err != nil {
+	if err := api.Start(cg.ServerAddress); err != nil {
 		log.Fatalf("cannot start server: %v", err)
 	}
 }

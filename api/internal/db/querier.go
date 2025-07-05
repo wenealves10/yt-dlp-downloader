@@ -18,6 +18,7 @@ type Querier interface {
 	DeleteDownload(ctx context.Context, id uuid.UUID) error
 	GetDownloadByID(ctx context.Context, id uuid.UUID) (Download, error)
 	GetDownloadsByUser(ctx context.Context, arg GetDownloadsByUserParams) ([]Download, error)
+	GetDownloadsExpired(ctx context.Context) ([]Download, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
 	GetUsers(ctx context.Context) ([]User, error)

@@ -14,7 +14,10 @@ import { useQuery } from "@tanstack/react-query";
 import { getData } from "../../api/getData";
 import { bucketHost } from "../../constants/config";
 import { DownloadCounter } from "./DownloadCounter";
-import { useDownloadMutation } from "../../hooks/useDownloadMutation";
+import {
+  useDeleteDownloadMutation,
+  useDownloadMutation,
+} from "../../hooks/useDownloadMutation";
 import { useDownloads } from "../../hooks/useDownload";
 import type { Download as DownloadType } from "../../interface/Download";
 const apiUrl = import.meta.env.VITE_API_URL;
@@ -59,6 +62,7 @@ export const DownloaderPage: React.FC = () => {
   const [page, setPage] = useState(1);
   const [perPage] = useState(10);
   const { remaining, refetch } = useDownloads();
+  const deleteDownload = useDeleteDownloadMutation();
 
   const downloadsQuery = useQuery({
     queryKey: ["downloads", page, perPage],
@@ -147,7 +151,10 @@ export const DownloaderPage: React.FC = () => {
     setUrl("");
   };
 
-  const handleRemoveJob = (id: string) => {};
+  const handleRemoveJob = (id: string) => {
+    deleteDownload.mutate(id);
+    setJobs((prev) => prev.filter((job) => job.id !== id));
+  };
 
   return (
     <main className="bg-gray-900 text-white min-h-screen font-sans p-4 sm:p-6 lg:p-8">

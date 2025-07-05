@@ -40,3 +40,10 @@ WHERE id = $1;
 -- name: DeleteDownload :exec
 DELETE FROM downloads
 WHERE id = $1;
+
+-- name: GetDownloadsExpired :many
+SELECT *
+FROM downloads
+WHERE status = 'COMPLETED'
+  AND expires_at IS NOT NULL
+  AND expires_at <= NOW();

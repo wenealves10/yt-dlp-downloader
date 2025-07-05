@@ -161,6 +161,47 @@ func (q *Queries) GetDownloadsByUser(ctx context.Context, arg GetDownloadsByUser
 	return items, nil
 }
 
+const getDownloadsExpired = `-- name: GetDownloadsExpired :many
+SELECT id, user_id, original_url, title, format, status, thumbnail_url, file_url, expires_at, duration_seconds, error_message, created_at
+FROM downloads
+WHERE status = 'COMPLETED'
+  AND expires_at IS NOT NULL
+  AND expires_at <= NOW()
+`
+
+func (q *Queries) GetDownloadsExpired(ctx context.Context) ([]Download, error) {
+	rows, err := q.db.Query(ctx, getDownloadsExpired)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Download{}
+	for rows.Next() {
+		var i Download
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.OriginalUrl,
+			&i.Title,
+			&i.Format,
+			&i.Status,
+			&i.ThumbnailUrl,
+			&i.FileUrl,
+			&i.ExpiresAt,
+			&i.DurationSeconds,
+			&i.ErrorMessage,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateDownload = `-- name: UpdateDownload :exec
 UPDATE downloads
 SET

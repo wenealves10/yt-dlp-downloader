@@ -41,7 +41,6 @@ func (p *JobUploadMusic) ProcessTask(ctx context.Context, task *asynq.Task) erro
 	musicPathDest := fmt.Sprintf("uploads/musics/%s", payload.Filename)
 	bannerPathDest := fmt.Sprintf("uploads/banners/%s_banner.jpg", utils.GenerateUUIDString())
 
-	// Check if the download ID exists in the database
 	downloadID, err := utils.ParseUUID(payload.DownloadID)
 	if err != nil {
 		return fmt.Errorf("invalid download ID format: %v", err)
@@ -62,8 +61,6 @@ func (p *JobUploadMusic) ProcessTask(ctx context.Context, task *asynq.Task) erro
 	}
 
 	expiredAt := time.Now().Add(24 * time.Hour)
-
-	// atualizar o download no banco de dados
 	if err := p.store.UpdateDownload(ctx, db.UpdateDownloadParams{
 		ID:           downloadID,
 		Status:       db.CoreDownloadStatusCOMPLETED,
@@ -74,7 +71,6 @@ func (p *JobUploadMusic) ProcessTask(ctx context.Context, task *asynq.Task) erro
 		return fmt.Errorf("failed to update download: %v: %w", err, asynq.SkipRetry)
 	}
 
-	// Publish the event to the Redis stream
 	if err := p.rdStream.Publish(ctx, stream.StreamName, stream.DownloadEvent{
 		ID:           payload.DownloadID,
 		UserID:       downloadExists.UserID.String(),
@@ -86,7 +82,6 @@ func (p *JobUploadMusic) ProcessTask(ctx context.Context, task *asynq.Task) erro
 		log.Println("failed to publish download event:", err)
 	}
 
-	// Optionally, you can remove the local music file after uploading
 	if err := utils.RemoveFile(payload.MusicPath); err != nil {
 		return fmt.Errorf("failed to remove local video file: %v: %w", err, asynq.SkipRetry)
 	}
