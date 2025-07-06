@@ -270,10 +270,6 @@ func (s *Server) deleteDownload(ctx *gin.Context) {
 		return
 	}
 
-	if err := s.storage.DeleteFile(ctx, downloadExists.ThumbnailUrl.String); err != nil {
-		log.Printf("Failed to delete thumbnail from storage: %v", err)
-	}
-
 	if err := s.storage.DeleteFile(ctx, downloadExists.FileUrl.String); err != nil {
 		log.Printf("Failed to delete file from storage: %v", err)
 	}

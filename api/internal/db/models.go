@@ -162,6 +162,7 @@ type Download struct {
 	DurationSeconds pgtype.Int4        `json:"duration_seconds"`
 	ErrorMessage    pgtype.Text        `json:"error_message"`
 	CreatedAt       *time.Time         `json:"created_at"`
+	DeletedAt       pgtype.Timestamptz `json:"deleted_at"`
 }
 
 type User struct {

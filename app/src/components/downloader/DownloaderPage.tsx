@@ -25,7 +25,7 @@ const apiUrl = import.meta.env.VITE_API_URL;
 interface Job {
   id: string;
   title?: string;
-  status: "queue" | "processing" | "complete" | "error";
+  status: "queue" | "processing" | "complete" | "expired" | "error";
   format: string;
   thumbnail?: string;
   downloadUrl?: string;
@@ -46,6 +46,8 @@ function convertStatus(apiStatus: string): Job["status"] {
       return "processing";
     case "COMPLETED":
       return "complete";
+    case "EXPIRED":
+      return "expired";
     case "FAILED":
       return "error";
     default:

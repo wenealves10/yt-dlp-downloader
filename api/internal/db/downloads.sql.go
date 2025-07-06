@@ -15,6 +15,7 @@ import (
 const countDownloadsByUser = `-- name: CountDownloadsByUser :one
 SELECT COUNT(*) FROM downloads
 WHERE user_id = $1
+  AND deleted_at IS NULL
 `
 
 func (q *Queries) CountDownloadsByUser(ctx context.Context, userID uuid.UUID) (int64, error) {
@@ -31,7 +32,7 @@ INSERT INTO downloads (
 VALUES (
   $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
 )
-RETURNING id, user_id, original_url, title, format, status, thumbnail_url, file_url, expires_at, duration_seconds, error_message, created_at
+RETURNING id, user_id, original_url, title, format, status, thumbnail_url, file_url, expires_at, duration_seconds, error_message, created_at, deleted_at
 `
 
 type CreateDownloadParams struct {
@@ -76,12 +77,14 @@ func (q *Queries) CreateDownload(ctx context.Context, arg CreateDownloadParams) 
 		&i.DurationSeconds,
 		&i.ErrorMessage,
 		&i.CreatedAt,
+		&i.DeletedAt,
 	)
 	return i, err
 }
 
 const deleteDownload = `-- name: DeleteDownload :exec
-DELETE FROM downloads
+UPDATE downloads
+SET deleted_at = NOW()
 WHERE id = $1
 `
 
@@ -91,8 +94,9 @@ func (q *Queries) DeleteDownload(ctx context.Context, id uuid.UUID) error {
 }
 
 const getDownloadByID = `-- name: GetDownloadByID :one
-SELECT id, user_id, original_url, title, format, status, thumbnail_url, file_url, expires_at, duration_seconds, error_message, created_at FROM downloads
+SELECT id, user_id, original_url, title, format, status, thumbnail_url, file_url, expires_at, duration_seconds, error_message, created_at, deleted_at FROM downloads
 WHERE id = $1
+  AND deleted_at IS NULL
 `
 
 func (q *Queries) GetDownloadByID(ctx context.Context, id uuid.UUID) (Download, error) {
@@ -111,13 +115,15 @@ func (q *Queries) GetDownloadByID(ctx context.Context, id uuid.UUID) (Download, 
 		&i.DurationSeconds,
 		&i.ErrorMessage,
 		&i.CreatedAt,
+		&i.DeletedAt,
 	)
 	return i, err
 }
 
 const getDownloadsByUser = `-- name: GetDownloadsByUser :many
-SELECT id, user_id, original_url, title, format, status, thumbnail_url, file_url, expires_at, duration_seconds, error_message, created_at FROM downloads
-WHERE user_id = $1
+SELECT id, user_id, original_url, title, format, status, thumbnail_url, file_url, expires_at, duration_seconds, error_message, created_at, deleted_at FROM downloads
+WHERE user_id = $1 
+  AND deleted_at IS NULL
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3
 `
@@ -150,6 +156,7 @@ func (q *Queries) GetDownloadsByUser(ctx context.Context, arg GetDownloadsByUser
 			&i.DurationSeconds,
 			&i.ErrorMessage,
 			&i.CreatedAt,
+			&i.DeletedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -162,9 +169,10 @@ func (q *Queries) GetDownloadsByUser(ctx context.Context, arg GetDownloadsByUser
 }
 
 const getDownloadsExpired = `-- name: GetDownloadsExpired :many
-SELECT id, user_id, original_url, title, format, status, thumbnail_url, file_url, expires_at, duration_seconds, error_message, created_at
+SELECT id, user_id, original_url, title, format, status, thumbnail_url, file_url, expires_at, duration_seconds, error_message, created_at, deleted_at
 FROM downloads
 WHERE status = 'COMPLETED'
+  AND deleted_at IS NULL
   AND expires_at IS NOT NULL
   AND expires_at <= NOW()
 `
@@ -191,6 +199,7 @@ func (q *Queries) GetDownloadsExpired(ctx context.Context) ([]Download, error) {
 			&i.DurationSeconds,
 			&i.ErrorMessage,
 			&i.CreatedAt,
+			&i.DeletedAt,
 		); err != nil {
 			return nil, err
 		}

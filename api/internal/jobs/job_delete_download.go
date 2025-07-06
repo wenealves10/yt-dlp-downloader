@@ -43,13 +43,11 @@ func (p *JobDeleteDownload) ProcessTask(ctx context.Context, task *asynq.Task) e
 		return fmt.Errorf("failed to check download existence: %v", err)
 	}
 
-	if err := p.store.DeleteDownload(ctx, downloadExists.ID); err != nil {
-		return fmt.Errorf("failed to delete download from database: %v", err)
-	}
-
-	if err := p.r2Storage.DeleteFile(ctx, downloadExists.ThumbnailUrl.String); err != nil {
-		log.Printf("Failed to delete thumbnail from storage: %v", err)
-		return fmt.Errorf("failed to delete thumbnail from storage: %v", err)
+	if err := p.store.UpdateDownloadStatus(ctx, db.UpdateDownloadStatusParams{
+		ID:     downloadExists.ID,
+		Status: db.CoreDownloadStatusEXPIRED,
+	}); err != nil {
+		return fmt.Errorf("failed to update download status: %v", err)
 	}
 
 	if err := p.r2Storage.DeleteFile(ctx, downloadExists.FileUrl.String); err != nil {

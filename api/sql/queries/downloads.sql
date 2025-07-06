@@ -9,17 +9,20 @@ RETURNING *;
 
 -- name: GetDownloadByID :one
 SELECT * FROM downloads
-WHERE id = $1;
+WHERE id = $1
+  AND deleted_at IS NULL;
 
 -- name: GetDownloadsByUser :many
 SELECT * FROM downloads
-WHERE user_id = $1
+WHERE user_id = $1 
+  AND deleted_at IS NULL
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3;
 
 -- name: CountDownloadsByUser :one
 SELECT COUNT(*) FROM downloads
-WHERE user_id = $1;
+WHERE user_id = $1
+  AND deleted_at IS NULL;
 
 -- name: UpdateDownloadStatus :exec
 UPDATE downloads
@@ -38,12 +41,14 @@ SET
 WHERE id = $1;
 
 -- name: DeleteDownload :exec
-DELETE FROM downloads
+UPDATE downloads
+SET deleted_at = NOW()
 WHERE id = $1;
 
 -- name: GetDownloadsExpired :many
 SELECT *
 FROM downloads
 WHERE status = 'COMPLETED'
+  AND deleted_at IS NULL
   AND expires_at IS NOT NULL
   AND expires_at <= NOW();

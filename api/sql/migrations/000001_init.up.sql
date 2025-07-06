@@ -53,7 +53,8 @@ CREATE TABLE "downloads" (
   "expires_at" TIMESTAMPTZ DEFAULT null,
   "duration_seconds" INT DEFAULT 0,
   "error_message" TEXT DEFAULT null,
-  "created_at" TIMESTAMPTZ NOT NULL DEFAULT 'now()'
+  "created_at" TIMESTAMPTZ NOT NULL DEFAULT 'now()',
+  "deleted_at" TIMESTAMPTZ DEFAULT null
 );
 
 CREATE UNIQUE INDEX ON "users" ("email");

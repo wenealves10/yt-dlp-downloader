@@ -13,7 +13,7 @@ import { StatusBadge } from "../ui/StatusBadge";
 interface Job {
   id: string;
   title?: string;
-  status: "queue" | "processing" | "complete" | "error";
+  status: "queue" | "processing" | "complete" | "expired" | "error";
   format: string;
   thumbnail?: string;
   downloadUrl?: string;
