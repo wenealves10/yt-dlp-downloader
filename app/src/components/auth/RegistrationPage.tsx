@@ -3,6 +3,7 @@ import { Youtube, User, Mail, Lock } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
 import { register, type RegisterPayload } from "../../api/auth";
+import { Turnstile } from "../turnstile/Turnstile";
 
 export const RegistrationPage: React.FC = () => {
   const navigate = useNavigate();
@@ -10,6 +11,7 @@ export const RegistrationPage: React.FC = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [token, setToken] = useState<string>("");
 
   const registerMutation = useMutation({
     mutationFn: (payload: RegisterPayload) => register(payload),
@@ -27,7 +29,12 @@ export const RegistrationPage: React.FC = () => {
       alert("As senhas não coincidem. Tente novamente.");
       return;
     }
-    registerMutation.mutate({ full_name: name, email, password });
+    registerMutation.mutate({
+      full_name: name,
+      email,
+      password,
+      turnstileToken: token,
+    });
   };
 
   const onSwitchToLogin = () => {
@@ -102,10 +109,16 @@ export const RegistrationPage: React.FC = () => {
                 onChange={(e) => setConfirmPassword(e.target.value)}
               />
             </div>
+            <div className="w-full flex items-center justify-center mt-4">
+              <Turnstile
+                siteKey={import.meta.env.VITE_SITE_KEY || ""}
+                onVerify={setToken}
+              />
+            </div>
             <button
               type="submit"
               className="w-full flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-6 rounded-lg transition-all"
-              disabled={registerMutation.isPending}
+              disabled={registerMutation.isPending || !token}
             >
               {registerMutation.isPending ? "Criando conta..." : "Registrar"}
             </button>

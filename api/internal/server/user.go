@@ -15,9 +15,10 @@ import (
 )
 
 type createUserRequest struct {
-	FullName string `json:"full_name" binding:"required"`
-	Email    string `json:"email" binding:"required,email"`
-	Password string `json:"password" binding:"required,min=6"`
+	FullName       string `json:"full_name" binding:"required"`
+	Email          string `json:"email" binding:"required,email"`
+	Password       string `json:"password" binding:"required,min=6"`
+	TurnstileToken string `json:"turnstileToken" binding:"required"`
 }
 
 type userResponse struct {
@@ -50,6 +51,12 @@ func (s *Server) register(ctx *gin.Context) {
 	var req createUserRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		ctx.JSON(http.StatusBadRequest, errorResponse(err))
+		return
+	}
+
+	ip := ctx.ClientIP()
+	if !s.validateTurnstile(req.TurnstileToken, ip) {
+		ctx.JSON(http.StatusUnauthorized, errorResponse(errors.New("invalid Turnstile token")))
 		return
 	}
 
@@ -86,8 +93,9 @@ func (s *Server) register(ctx *gin.Context) {
 }
 
 type loginUserRequest struct {
-	Email    string `json:"email" binding:"required,email"`
-	Password string `json:"password" binding:"required,min=6"`
+	Email          string `json:"email" binding:"required,email"`
+	Password       string `json:"password" binding:"required,min=6"`
+	TurnstileToken string `json:"turnstileToken" binding:"required"`
 }
 
 type loginUserResponse struct {
@@ -99,6 +107,12 @@ func (s *Server) login(ctx *gin.Context) {
 	var req loginUserRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		ctx.JSON(http.StatusBadRequest, errorResponse(err))
+		return
+	}
+
+	ip := ctx.ClientIP()
+	if !s.validateTurnstile(req.TurnstileToken, ip) {
+		ctx.JSON(http.StatusUnauthorized, errorResponse(errors.New("invalid Turnstile token")))
 		return
 	}
 

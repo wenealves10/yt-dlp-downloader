@@ -3,6 +3,7 @@ const apiUrl = import.meta.env.VITE_API_URL;
 export type LoginPayload = {
   email: string;
   password: string;
+  turnstileToken: string; // token do Turnstile
 };
 
 export async function login(payload: LoginPayload) {
@@ -23,6 +24,7 @@ export type RegisterPayload = {
   full_name: string;
   email: string;
   password: string;
+  turnstileToken: string; // token do Turnstile
 };
 
 export async function register(payload: RegisterPayload) {

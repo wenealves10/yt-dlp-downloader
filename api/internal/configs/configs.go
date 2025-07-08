@@ -42,6 +42,9 @@ type Config struct {
 	// # Proxy configuration
 	ProxyEnabled bool   `mapstructure:"PROXY_ENABLED"`
 	ProxyURL     string `mapstructure:"PROXY_URL"`
+
+	// Turnstile
+	TurnstileSecret string `mapstructure:"TURNSTILE_SECRET"`
 }
 
 var LoadedConfig Config

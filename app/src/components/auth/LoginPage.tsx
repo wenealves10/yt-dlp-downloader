@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
 import { login, type LoginPayload } from "../../api/auth";
 import { useAuth } from "../../hooks/useAuth";
+import { Turnstile } from "../turnstile/Turnstile";
 
 export const LoginPage: React.FC = () => {
   const navigate = useNavigate();
@@ -11,6 +12,7 @@ export const LoginPage: React.FC = () => {
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [token, setToken] = useState<string>("");
 
   const loginMutation = useMutation({
     mutationFn: (payload: LoginPayload) => login(payload),
@@ -24,7 +26,7 @@ export const LoginPage: React.FC = () => {
   });
 
   const onLogin = () => {
-    loginMutation.mutate({ email, password });
+    loginMutation.mutate({ email, password, turnstileToken: token });
   };
 
   const onSwitchToRegister = () => {
@@ -77,10 +79,16 @@ export const LoginPage: React.FC = () => {
                 className="w-full bg-gray-900 border border-gray-600 rounded-lg py-3 pl-10 pr-4 focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all placeholder-gray-500 text-white"
               />
             </div>
+            <div className="w-full flex items-center justify-center mt-4">
+              <Turnstile
+                siteKey={import.meta.env.VITE_SITE_KEY || ""}
+                onVerify={setToken}
+              />
+            </div>
             <button
               type="submit"
               className="w-full flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-6 rounded-lg transition-all"
-              disabled={loginMutation.isPending}
+              disabled={loginMutation.isPending || !token}
             >
               {loginMutation.isPending ? "Entrando..." : "Entrar"}
             </button>
