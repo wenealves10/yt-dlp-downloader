@@ -2,6 +2,9 @@ package configs
 
 import (
 	"fmt"
+	"os"
+	"reflect"
+	"strings"
 	"time"
 
 	"github.com/spf13/viper"
@@ -50,24 +53,42 @@ type Config struct {
 var LoadedConfig Config
 
 func LoadConfig(path string) (Config, error) {
+	var config Config
+
 	viper.AddConfigPath(path)
 	viper.SetConfigName(".env")
 	viper.SetConfigType("env")
-
 	viper.AutomaticEnv()
 
-	err := viper.ReadInConfig()
-	if err != nil {
-		return Config{}, fmt.Errorf("erro ao ler .env: %w", err)
+	if _, err := os.Stat(path + "/.env"); err == nil {
+		err = viper.ReadInConfig()
+		if err != nil {
+			return Config{}, fmt.Errorf("erro ao ler .env: %w", err)
+		}
+	} else {
+		fmt.Println("⚠️ Arquivo .env não encontrado, usando apenas variáveis de ambiente")
+		bindEnvVariables(&config)
 	}
 
-	var config Config
-	err = viper.Unmarshal(&config)
+	err := viper.Unmarshal(&config)
 	if err != nil {
 		return Config{}, fmt.Errorf("erro ao mapear config: %w", err)
 	}
 
-	fmt.Printf("✔️  Variáveis carregadas para ambiente: %s\n", config.Env)
 	LoadedConfig = config
 	return config, nil
+}
+
+func bindEnvVariables(cfg interface{}) {
+	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	val := reflect.ValueOf(cfg).Elem()
+	typ := val.Type()
+	for i := 0; i < val.NumField(); i++ {
+		field := typ.Field(i)
+		tag := field.Tag.Get("mapstructure")
+		if tag == "" {
+			continue
+		}
+		_ = viper.BindEnv(tag)
+	}
 }

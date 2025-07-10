@@ -163,11 +163,8 @@ export const DownloaderPage: React.FC = () => {
       <div className="max-w-4xl mx-auto">
         <header className="mb-8 flex justify-between items-center">
           <div className="flex items-center gap-4">
-            <Youtube className="h-10 w-10 text-red-600" />
             <div>
-              <h1 className="text-3xl font-bold tracking-tight bg-gradient-to-r from-red-500 to-red-700 text-transparent bg-clip-text">
-                AdVideo
-              </h1>
+              <img src="/logo.svg" alt="AdVideo Logo" className="h-auto w-32" />
             </div>
           </div>
           <div className="flex items-center gap-4">

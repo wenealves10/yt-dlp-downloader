@@ -108,18 +108,15 @@ func (*JobDownloadVideo) downloadVideo(ctx context.Context, filename string, out
 
 	cmd := exec.CommandContext(ctx, "yt-dlp",
 		"-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4",
+		"--merge-output-format", "mp4",
 		"-o", outputFilePath,
 		urlVideo,
 	)
-
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("failed to execute command: %v, output: %s", err, output)
 	}
 
-	fmt.Printf("Command output: %s\n", output)
-
-	//check if download was successful by checking if the file exists
 	if exists, err := utils.FileExists(outputFilePath); err != nil || !exists {
 		return "", fmt.Errorf("download failed, file does not exist: %s, error: %v", outputFilePath, err)
 	}

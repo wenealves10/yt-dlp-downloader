@@ -3,13 +3,18 @@ package utils
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/google/uuid"
 )
 
 func FileExists(path string) (bool, error) {
-	info, err := os.Stat(path)
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return false, fmt.Errorf("erro ao gerar path absoluto: %w", err)
+	}
+	info, err := os.Stat(absPath)
 	if err == nil {
 		return !info.IsDir(), nil
 	}
@@ -32,7 +37,7 @@ func CreateFolder(path string) error {
 		return fmt.Errorf("erro ao verificar a existência da pasta: %w", err)
 	}
 
-	if err := os.MkdirAll(path, os.ModePerm); err != nil {
+	if err := os.MkdirAll(path, 0755); err != nil {
 		return fmt.Errorf("erro ao criar pasta '%s': %w", path, err)
 	}
 

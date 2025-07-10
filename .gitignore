@@ -34,3 +34,4 @@ go.work.sum
 */uploads/videos
 */uploads/musics
 */bin/*
+docker-stack

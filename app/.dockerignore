@@ -1,0 +1,30 @@
+# Ignorar arquivos de configuração do Git
+.git
+.gitignore
+
+# Ignorar arquivos do Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Ignorar arquivos e diretórios relacionados a desenvolvimento
+node_modules
+npm-debug.log
+.env
+.env.example
+
+# Ignorar arquivos e diretórios temporários e de build
+*.log
+*.tmp
+*.bak
+*.swp
+
+# Ignorar arquivos de testes e diretórios relacionados a testes
+test
+tests
+
+# Ignorar diretórios de build
+build
+bin
+dist
+tmp

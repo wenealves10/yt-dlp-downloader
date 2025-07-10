@@ -1,0 +1,41 @@
+name: Tag by Project
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  tag-projects:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        project: [app, api]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0 # required to compare commits
+
+      - name: Check for changes in ${{ matrix.project }}
+        id: changes
+        run: |
+          if git diff --quiet HEAD^ HEAD -- ${{ matrix.project }}; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+          else
+            echo "changed=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create new tag for ${{ matrix.project }}
+        if: steps.changes.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          count=$(git rev-list --count HEAD -- ${{ matrix.project }})
+          tag="${{ matrix.project }}/v1.0.${count}"
+
+          echo "Creating tag: $tag"
+          git tag -a "$tag" -m "Release $tag"
+          git push origin "$tag"

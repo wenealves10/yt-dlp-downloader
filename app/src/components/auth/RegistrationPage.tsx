@@ -45,8 +45,10 @@ export const RegistrationPage: React.FC = () => {
     <div className="bg-gray-900 min-h-screen flex items-center justify-center p-4 font-sans">
       <div className="w-full max-w-md">
         <header className="text-center mb-8">
-          <div className="flex justify-center items-center gap-4">
-            <Youtube className="h-12 w-12 text-red-600" />
+          <div className="flex flex-col justify-center items-center gap-1">
+            <div>
+              <img src="/logo.svg" alt="AdVideo Logo" className="h-auto w-40" />
+            </div>
             <div>
               <h1 className="text-4xl sm:text-5xl font-bold tracking-tight bg-gradient-to-r from-red-500 to-red-700 text-transparent bg-clip-text">
                 Crie sua Conta
