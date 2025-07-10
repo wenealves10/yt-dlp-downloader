@@ -8,6 +8,10 @@ on:
 jobs:
   tag-projects:
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
     strategy:
       matrix:
         project: [app, api]
