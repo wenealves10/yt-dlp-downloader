@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Youtube, Mail, Lock } from "lucide-react";
+import { Mail, Lock } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
 import { login, type LoginPayload } from "../../api/auth";

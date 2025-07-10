@@ -1,12 +1,5 @@
 import React, { useEffect, useState } from "react";
-import {
-  Youtube,
-  Link,
-  Clapperboard,
-  Music,
-  Download,
-  Loader,
-} from "lucide-react";
+import { Link, Clapperboard, Music, Download, Loader } from "lucide-react";
 import { UserMenu } from "../user/UserMenu";
 import { DownloadCard } from "./DownloadCard";
 import { useAuth } from "../../hooks/useAuth";
@@ -61,7 +54,7 @@ export const DownloaderPage: React.FC = () => {
   const [format, setFormat] = useState("video");
   const [jobs, setJobs] = useState<Job[]>([]);
   const [error, setError] = useState("");
-  const [page, setPage] = useState(1);
+  const [page] = useState(1);
   const [perPage] = useState(10);
   const { remaining, refetch } = useDownloads();
   const deleteDownload = useDeleteDownloadMutation();

@@ -7,14 +7,17 @@ COPY package*.json ./
 RUN npm ci
 
 COPY . .
-# build o frontend
 RUN npm run build
 
-FROM nginx:alpine as production
+# Stage 2: Deploy
+FROM nginx:alpine AS production
+
 # Remove conteúdo padrão
 RUN rm -rf /usr/share/nginx/html/*
+
 # Copia build do frontend
 COPY --from=builder /app/dist /usr/share/nginx/html
+
 # Copia a configuração customizada
 COPY nginx.conf /etc/nginx/nginx.conf
 

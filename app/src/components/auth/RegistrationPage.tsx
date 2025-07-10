@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Youtube, User, Mail, Lock } from "lucide-react";
+import { User, Mail, Lock } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
 import { register, type RegisterPayload } from "../../api/auth";
@@ -15,9 +15,8 @@ export const RegistrationPage: React.FC = () => {
 
   const registerMutation = useMutation({
     mutationFn: (payload: RegisterPayload) => register(payload),
-    onSuccess: (data) => {
+    onSuccess: () => {
       navigate("/");
-      alert("Conta criada com sucesso! Faça login para continuar.");
     },
     onError: () => {
       alert("Erro ao criar conta. Verifique os dados e tente novamente.");
