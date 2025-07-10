@@ -1,10 +1,9 @@
 name: Build and Deploy Frontend Docker Image
 
 on:
-  workflow_run:
-    workflows: ["Tag by Project"]
-    types:
-      - completed
+  push:
+    tags:
+      - "app/v*.*.*"
 
 jobs:
   build-and-push:

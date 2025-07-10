@@ -1,10 +1,9 @@
 name: Build and Deploy Worker Docker Image
 
 on:
-  workflow_run:
-    workflows: ["Tag by Project"]
-    types:
-      - completed
+  push:
+    tags:
+      - "api/v*.*.*"
 
 jobs:
   build-and-push:
