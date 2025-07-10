@@ -18,7 +18,7 @@ RUN rm -rf /usr/share/nginx/html/*
 # Copia build do frontend
 COPY --from=builder /app/dist /usr/share/nginx/html
 
-# Copia a configuração customizada
+# Copia a configuração customizada do Nginx
 COPY nginx.conf /etc/nginx/nginx.conf
 
 EXPOSE 80
