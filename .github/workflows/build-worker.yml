@@ -34,8 +34,8 @@ jobs:
       - name: Extract version tag
         id: extract_tag
         run: |
-          # GITHUB_REF_NAME já vem como 'app/v.*.*'
-          TAG_NAME="${GITHUB_REF_NAME#app/}"
+          # GITHUB_REF_NAME já vem como 'api/v.*.*'
+          TAG_NAME="${GITHUB_REF_NAME#api/}"
           echo "VERSION=$TAG_NAME" >> $GITHUB_OUTPUT
           echo "Extracted version: $TAG_NAME"
 
