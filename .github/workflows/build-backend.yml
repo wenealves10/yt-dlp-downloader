@@ -9,6 +9,7 @@ jobs:
   build-and-push:
     name: Build, Tag & Push Docker Image
     runs-on: ubuntu-latest
+
     permissions:
       contents: read
       packages: write
@@ -34,11 +35,10 @@ jobs:
       - name: Extract version tag
         id: extract_tag
         run: |
-          if [[ "${{ github.ref }}" =~ refs/tags/(v[0-9]+\.[0-9]+\.[0-9]+) ]]; then
-            echo "VERSION=${BASH_REMATCH[1]}" >> $GITHUB_OUTPUT
-          else
-            echo "VERSION=latest" >> $GITHUB_OUTPUT
-          fi
+          # GITHUB_REF_NAME já vem como 'api/v.*.*'
+          TAG_NAME="${GITHUB_REF_NAME#api/}"
+          echo "VERSION=$TAG_NAME" >> $GITHUB_OUTPUT
+          echo "Extracted version: $TAG_NAME"
 
       - name: Build and push image
         uses: docker/build-push-action@v4

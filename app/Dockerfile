@@ -7,6 +7,7 @@ COPY package*.json ./
 RUN npm ci
 
 COPY . .
+# build o frontend
 RUN npm run build
 
 FROM nginx:alpine as production

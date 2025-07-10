@@ -33,7 +33,7 @@ RUN apt-get update && apt-get install -y \
 
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Copiar o binário compilado
+# Copiar o binário compilado do servidor
 COPY --from=builder /app/server ./main
 
 EXPOSE 8080
