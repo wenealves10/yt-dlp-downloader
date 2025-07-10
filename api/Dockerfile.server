@@ -12,7 +12,7 @@ RUN go mod download
 
 COPY . .
 
-# Compilar o binário
+# Compilar o binário do servidor
 RUN go build -o server ./cmd/server/main.go
 
 # Etapa 2: Runtime
