@@ -1,9 +1,10 @@
 name: Build and Deploy Backend Docker Image
 
 on:
-  push:
-    tags:
-      - "api/v*.*.*"
+  workflow_run:
+    workflows: ["Tag by Project"]
+    types:
+      - completed
 
 jobs:
   build-and-push:
