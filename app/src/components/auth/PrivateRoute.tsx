@@ -16,13 +16,16 @@ export default function PrivateRoute() {
       }
 
       try {
-        const response = await fetch("http://localhost:8080/v1/profile", {
-          method: "GET",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-        });
+        const response = await fetch(
+          `${import.meta.env.VITE_API_URL}/v1/profile`,
+          {
+            method: "GET",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+          }
+        );
 
         if (response.ok) {
           const userData = await response.json();
