@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
+	"github.com/wenealves10/yt-dlp-downloader/internal/configs"
 	"github.com/wenealves10/yt-dlp-downloader/internal/db"
 	"github.com/wenealves10/yt-dlp-downloader/internal/helpers"
 	"github.com/wenealves10/yt-dlp-downloader/internal/libs/stream"
@@ -106,12 +107,25 @@ func (*JobDownloadVideo) downloadVideo(ctx context.Context, filename string, out
 		}
 	}
 
-	cmd := exec.CommandContext(ctx, "yt-dlp",
-		"-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4",
-		"--merge-output-format", "mp4",
-		"-o", outputFilePath,
-		urlVideo,
-	)
+	var cmd *exec.Cmd
+	if configs.LoadedConfig.ProxyEnabled {
+		proxyUrl := configs.LoadedConfig.ProxyURL
+		cmd = exec.CommandContext(ctx, "yt-dlp",
+			"--proxy", proxyUrl,
+			"-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4",
+			"--merge-output-format", "mp4",
+			"-o", outputFilePath,
+			urlVideo,
+		)
+	} else {
+		cmd = exec.CommandContext(ctx, "yt-dlp",
+			"-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4",
+			"--merge-output-format", "mp4",
+			"-o", outputFilePath,
+			urlVideo,
+		)
+	}
+
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("failed to execute command: %v, output: %s", err, output)

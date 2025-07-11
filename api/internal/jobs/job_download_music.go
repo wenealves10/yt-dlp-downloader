@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
+	"github.com/wenealves10/yt-dlp-downloader/internal/configs"
 	"github.com/wenealves10/yt-dlp-downloader/internal/db"
 	"github.com/wenealves10/yt-dlp-downloader/internal/helpers"
 	"github.com/wenealves10/yt-dlp-downloader/internal/libs/stream"
@@ -106,13 +107,26 @@ func (*JobDownloadMusic) downloadMusic(ctx context.Context, filename string, out
 		}
 	}
 
-	cmd := exec.CommandContext(ctx, "yt-dlp",
-		"-x",                    // Extrai o áudio
-		"--audio-format", "mp3", // Converte para MP3
-		"--audio-quality", "0", // Qualidade máxima
-		"-o", outputFilePath, // Caminho de saída
-		urlMusic, // URL do vídeo/música
-	)
+	var cmd *exec.Cmd
+	if configs.LoadedConfig.ProxyEnabled {
+		proxyUrl := configs.LoadedConfig.ProxyURL
+		cmd = exec.CommandContext(ctx, "yt-dlp",
+			"--proxy", proxyUrl,
+			"-x",
+			"--audio-format", "mp3",
+			"--audio-quality", "0",
+			"-o", outputFilePath,
+			urlMusic,
+		)
+	} else {
+		cmd = exec.CommandContext(ctx, "yt-dlp",
+			"-x",
+			"--audio-format", "mp3",
+			"--audio-quality", "0",
+			"-o", outputFilePath,
+			urlMusic,
+		)
+	}
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
