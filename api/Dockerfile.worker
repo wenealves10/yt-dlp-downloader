@@ -12,7 +12,7 @@ RUN go mod download
 
 COPY . .
 
-# Compilar o binário
+# Compilar o binário do worker
 RUN go build -o worker ./cmd/worker/main.go
 
 # Etapa 2: Runtime
