@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const createUser = `-- name: CreateUser :one
@@ -152,6 +153,52 @@ func (q *Queries) GetUsers(ctx context.Context) ([]User, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const updateUser = `-- name: UpdateUser :exec
+UPDATE users
+SET
+  full_name = COALESCE($2,full_name),
+  email = COALESCE($3, email),
+  photo_url = COALESCE($4, photo_url),
+  plan = COALESCE($5, plan),
+  daily_limit = COALESCE($6, daily_limit),
+  active = COALESCE($7, active),
+  is_verified = COALESCE($8, is_verified),
+  hashed_password = COALESCE($9, hashed_password),
+  password_changed_at = COALESCE($10, password_changed_at),
+  updated_at = now()
+WHERE id = $1
+RETURNING id, full_name, photo_url, email, hashed_password, password_changed_at, active, plan, daily_limit, last_login, is_verified, created_at, updated_at
+`
+
+type UpdateUserParams struct {
+	ID                uuid.UUID          `json:"id"`
+	FullName          pgtype.Text        `json:"full_name"`
+	Email             pgtype.Text        `json:"email"`
+	PhotoUrl          pgtype.Text        `json:"photo_url"`
+	Plan              NullCorePlanType   `json:"plan"`
+	DailyLimit        pgtype.Int4        `json:"daily_limit"`
+	Active            pgtype.Bool        `json:"active"`
+	IsVerified        pgtype.Bool        `json:"is_verified"`
+	HashedPassword    pgtype.Text        `json:"hashed_password"`
+	PasswordChangedAt pgtype.Timestamptz `json:"password_changed_at"`
+}
+
+func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) error {
+	_, err := q.db.Exec(ctx, updateUser,
+		arg.ID,
+		arg.FullName,
+		arg.Email,
+		arg.PhotoUrl,
+		arg.Plan,
+		arg.DailyLimit,
+		arg.Active,
+		arg.IsVerified,
+		arg.HashedPassword,
+		arg.PasswordChangedAt,
+	)
+	return err
 }
 
 const updateUserLoginInfo = `-- name: UpdateUserLoginInfo :exec

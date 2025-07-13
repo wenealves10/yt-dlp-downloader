@@ -84,6 +84,8 @@ func (server *Server) setupRouter() {
 
 	// user routes
 	authRoutes.GET("/profile", server.getProfile)
+	authRoutes.PATCH("/profile", server.updateProfile)
+	authRoutes.PUT("/change-password", server.updatePassword)
 
 	// downloads routes
 	authRoutes.GET("/downloads", server.getDownloads)

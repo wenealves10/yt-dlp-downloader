@@ -3,6 +3,9 @@ package server
 import (
 	"database/sql"
 	"errors"
+	"fmt"
+	"log"
+	"mime/multipart"
 	"net/http"
 	"time"
 
@@ -172,6 +175,84 @@ func (s *Server) getProfile(ctx *gin.Context) {
 	rsp := convertUserToResponse(user)
 	ctx.JSON(http.StatusOK, rsp)
 }
+
+type updateUserProfileRequest struct {
+	FullName string                `form:"full_name" binding:"omitempty,min=3"`
+	Photo    *multipart.FileHeader `form:"photo,omitempty"`
+}
+
+func (s *Server) updateProfile(ctx *gin.Context) {
+	var req updateUserProfileRequest
+	if err := ctx.ShouldBind(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, errorResponse(err))
+		return
+	}
+
+	if req.Photo != nil {
+		if !utils.ValidateImage(req.Photo) {
+			ctx.JSON(http.StatusBadRequest, errorResponse(errors.New("invalid image file")))
+			return
+		}
+	}
+
+	authPayload := ctx.MustGet(authorizationPayloadKey).(*tokens.Payload)
+	userID, err := utils.ParseUUID(authPayload.UserID)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, errorResponse(errors.New("invalid user ID")))
+		return
+	}
+
+	user, err := s.store.GetUserByID(ctx.Request.Context(), userID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			ctx.JSON(http.StatusNotFound, errorResponse(err))
+			return
+		}
+		ctx.JSON(http.StatusInternalServerError, errorResponse(err))
+		return
+	}
+
+	var fullName *string
+	if req.FullName != "" && user.FullName != req.FullName {
+		fullName = &req.FullName
+	}
+
+	var profilePathDest *string
+	if req.Photo != nil {
+
+		if user.PhotoUrl.String != "" {
+			if err := s.storage.DeleteFile(ctx.Request.Context(), user.PhotoUrl.String); err != nil {
+				log.Println("failed to delete old profile photo:", err)
+			}
+		}
+
+		filePathDest := fmt.Sprintf("uploads/profile/%s_photo.jpg", user.ID.String())
+		fileBytes, err := getFileBytes(req.Photo)
+		if err != nil {
+			ctx.JSON(http.StatusInternalServerError, errorResponse(errors.New("failed to read file bytes")))
+			return
+		}
+		if err := s.storage.UploadFileByte(ctx.Request.Context(), fileBytes, filePathDest); err != nil {
+			ctx.JSON(http.StatusInternalServerError, errorResponse(errors.New("failed to upload profile photo")))
+			return
+		}
+		profilePathDest = &filePathDest
+	}
+
+	if err := s.store.UpdateUser(ctx.Request.Context(), db.UpdateUserParams{
+		ID:       user.ID,
+		FullName: db.ToPgText(fullName),
+		PhotoUrl: db.ToPgText(profilePathDest),
+	}); err != nil {
+		log.Printf("Failed to update user profile: %v", err)
+		ctx.JSON(http.StatusInternalServerError, errorResponse(errors.New("failed to update user profile")))
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"message": "Profile updated successfully"})
+}
+
+func (s *Server) updatePassword(ctx *gin.Context) {}
 
 func convertUserToResponse(user db.User) userResponse {
 	return userResponse{

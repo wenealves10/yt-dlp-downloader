@@ -1,6 +1,7 @@
 package r2
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -42,6 +43,20 @@ func (s *s3Service) UploadFile(ctx context.Context, filePath, objectKey string) 
 	}
 
 	fmt.Printf("File %s uploaded to bucket %s with key %s\n", filePath, objectKey, s.bucketName)
+	return nil
+}
+
+func (s *s3Service) UploadFileByte(ctx context.Context, fileData []byte, objectKey string) error {
+	uploader := manager.NewUploader(s.client)
+	_, err := uploader.Upload(ctx, &s3.PutObjectInput{
+		Bucket: aws.String(s.bucketName),
+		Key:    aws.String(objectKey),
+		Body:   bytes.NewReader(fileData),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to upload file bytes: %w", err)
+	}
+	fmt.Printf("File bytes uploaded to bucket %s with key %s\n", s.bucketName, objectKey)
 	return nil
 }
 

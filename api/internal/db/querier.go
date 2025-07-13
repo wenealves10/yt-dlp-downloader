@@ -24,6 +24,7 @@ type Querier interface {
 	GetUsers(ctx context.Context) ([]User, error)
 	UpdateDownload(ctx context.Context, arg UpdateDownloadParams) error
 	UpdateDownloadStatus(ctx context.Context, arg UpdateDownloadStatusParams) error
+	UpdateUser(ctx context.Context, arg UpdateUserParams) error
 	UpdateUserLoginInfo(ctx context.Context, id uuid.UUID) error
 }
 
