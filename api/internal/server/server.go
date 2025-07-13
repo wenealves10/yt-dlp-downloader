@@ -59,7 +59,7 @@ func (server *Server) setupRouter() {
 	// Set up CORS middleware
 	config := cors.DefaultConfig()
 	config.AllowOrigins = []string{"*"}
-	config.AllowMethods = []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"}
+	config.AllowMethods = []string{"GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"}
 	config.AllowHeaders = []string{"Origin", "Content-Type", "Accept", "Authorization"}
 	router.Use(cors.New(config))
 
@@ -85,7 +85,7 @@ func (server *Server) setupRouter() {
 	// user routes
 	authRoutes.GET("/profile", server.getProfile)
 	authRoutes.PATCH("/profile", server.updateProfile)
-	authRoutes.PUT("/change-password", server.updatePassword)
+	authRoutes.PUT("/profile/change-password", server.updatePassword)
 
 	// downloads routes
 	authRoutes.GET("/downloads", server.getDownloads)

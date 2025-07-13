@@ -2,6 +2,7 @@ import { createContext, useState, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import type { User } from "../interface/User";
 import Loading from "../components/loading/Loading";
+import { getProfile } from "../api/auth";
 
 type AuthContextType = {
   token: string | null;
@@ -9,6 +10,7 @@ type AuthContextType = {
   logout: () => void;
   user: User | null;
   setUser: (user: User | null) => void;
+  refreshProfile: () => Promise<void>;
 };
 
 export const AuthContext = createContext<AuthContextType | null>(null);
@@ -35,51 +37,35 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     navigate("/", { replace: true });
   };
 
-  // Verificação automática do token ao iniciar
+  const refreshProfile = async () => {
+    if (!token) {
+      setIsChecking(false);
+      if (location.pathname !== "/") navigate("/", { replace: true });
+      return;
+    }
+    try {
+      const dataProfile = await getProfile(token);
+      setUser(dataProfile);
+      if (location.pathname === "/") {
+        navigate("/dashboard", { replace: true });
+      }
+    } catch (err) {
+      logout();
+    } finally {
+      setIsChecking(false);
+    }
+  };
+
   useEffect(() => {
-    const verifyToken = async () => {
-      if (!token) {
-        setIsChecking(false);
-        if (location.pathname !== "/") navigate("/", { replace: true });
-        return;
-      }
-
-      try {
-        const response = await fetch(
-          `${import.meta.env.VITE_API_URL}/v1/profile`,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-              "Content-Type": "application/json",
-            },
-          }
-        );
-
-        if (!response.ok) {
-          throw new Error("Token inválido");
-        }
-
-        const userData = await response.json();
-        setUser(userData);
-
-        if (location.pathname === "/") {
-          navigate("/dashboard", { replace: true });
-        }
-      } catch (err) {
-        logout();
-      } finally {
-        setIsChecking(false);
-      }
-    };
-
-    verifyToken();
+    refreshProfile();
   }, [token]);
 
-  // Enquanto verifica, pode exibir um loading global (opcional)
   if (isChecking) return <Loading />;
 
   return (
-    <AuthContext.Provider value={{ token, login, logout, user, setUser }}>
+    <AuthContext.Provider
+      value={{ token, login, logout, user, setUser, refreshProfile }}
+    >
       {children}
     </AuthContext.Provider>
   );

@@ -3,7 +3,7 @@ const apiUrl = import.meta.env.VITE_API_URL;
 export type LoginPayload = {
   email: string;
   password: string;
-  turnstileToken: string; // token do Turnstile
+  turnstileToken: string;
 };
 
 export async function login(payload: LoginPayload) {
@@ -17,14 +17,14 @@ export async function login(payload: LoginPayload) {
     throw new Error("Credenciais inválidas");
   }
 
-  return res.json(); // deve retornar { access_token: "...", user: { ... } }
+  return res.json();
 }
 
 export type RegisterPayload = {
   full_name: string;
   email: string;
   password: string;
-  turnstileToken: string; // token do Turnstile
+  turnstileToken: string;
 };
 
 export async function register(payload: RegisterPayload) {
@@ -38,5 +38,18 @@ export async function register(payload: RegisterPayload) {
     throw new Error("Erro ao registrar usuário");
   }
 
+  return res.json();
+}
+
+export async function getProfile(token: string) {
+  const res = await fetch(`${apiUrl}/v1/profile`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+  });
+  if (!res.ok) {
+    throw new Error("Erro ao obter perfil");
+  }
   return res.json();
 }

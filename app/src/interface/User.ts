@@ -1,7 +1,7 @@
 export interface User {
   id: string;
   full_name: string;
-  profile_url: string; // URL da imagem de perfil
+  photo_url: string; // URL da imagem de perfil
   email: string;
   password_changed_at: string; // ou Date se você for converter
   plan: "free" | "premium" | "enterprise";

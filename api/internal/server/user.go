@@ -122,7 +122,7 @@ func (s *Server) login(ctx *gin.Context) {
 	user, err := s.store.GetUserByEmail(ctx, req.Email)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			ctx.JSON(http.StatusNotFound, errorResponse(err))
+			ctx.JSON(http.StatusNotFound, errorResponse(errors.New("user not found")))
 			return
 		}
 		ctx.JSON(http.StatusInternalServerError, errorResponse(err))
@@ -165,7 +165,7 @@ func (s *Server) getProfile(ctx *gin.Context) {
 	user, err := s.store.GetUserByID(ctx.Request.Context(), userID)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			ctx.JSON(http.StatusNotFound, errorResponse(err))
+			ctx.JSON(http.StatusNotFound, errorResponse(errors.New("user not found")))
 			return
 		}
 		ctx.JSON(http.StatusInternalServerError, errorResponse(err))
@@ -205,7 +205,7 @@ func (s *Server) updateProfile(ctx *gin.Context) {
 	user, err := s.store.GetUserByID(ctx.Request.Context(), userID)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			ctx.JSON(http.StatusNotFound, errorResponse(err))
+			ctx.JSON(http.StatusNotFound, errorResponse(errors.New("user not found")))
 			return
 		}
 		ctx.JSON(http.StatusInternalServerError, errorResponse(err))
@@ -219,14 +219,13 @@ func (s *Server) updateProfile(ctx *gin.Context) {
 
 	var profilePathDest *string
 	if req.Photo != nil {
-
 		if user.PhotoUrl.String != "" {
 			if err := s.storage.DeleteFile(ctx.Request.Context(), user.PhotoUrl.String); err != nil {
 				log.Println("failed to delete old profile photo:", err)
 			}
 		}
 
-		filePathDest := fmt.Sprintf("uploads/profile/%s_photo.jpg", user.ID.String())
+		filePathDest := fmt.Sprintf("uploads/profile/%s/photo_%s.jpg", user.ID.String(), utils.GenerateUUID().String())
 		fileBytes, err := getFileBytes(req.Photo)
 		if err != nil {
 			ctx.JSON(http.StatusInternalServerError, errorResponse(errors.New("failed to read file bytes")))
@@ -252,7 +251,62 @@ func (s *Server) updateProfile(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"message": "Profile updated successfully"})
 }
 
-func (s *Server) updatePassword(ctx *gin.Context) {}
+type updatePasswordRequest struct {
+	CurrentPassword string `json:"current_password" binding:"required,min=6"`
+	NewPassword     string `json:"new_password" binding:"required,min=6"`
+}
+
+func (s *Server) updatePassword(ctx *gin.Context) {
+	authPayload := ctx.MustGet(authorizationPayloadKey).(*tokens.Payload)
+	userID, err := utils.ParseUUID(authPayload.UserID)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, errorResponse(errors.New("invalid user ID")))
+		return
+	}
+
+	var req updatePasswordRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, errorResponse(err))
+		return
+	}
+
+	user, err := s.store.GetUserByID(ctx.Request.Context(), userID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			ctx.JSON(http.StatusNotFound, errorResponse(errors.New("user not found")))
+			return
+		}
+		ctx.JSON(http.StatusInternalServerError, errorResponse(err))
+		return
+	}
+
+	if err := utils.CheckPassword(req.CurrentPassword, user.HashedPassword); err != nil {
+		ctx.JSON(http.StatusUnauthorized, errorResponse(errors.New("current password is incorrect")))
+		return
+	}
+
+	hashedNewPassword, err := utils.HashPassword(req.NewPassword)
+	if err != nil {
+		if bcrypt.ErrPasswordTooLong == err {
+			ctx.JSON(http.StatusBadRequest, errorResponse(errors.New("new password is too long")))
+			return
+		}
+		ctx.JSON(http.StatusInternalServerError, errorResponse(errors.New("failed to hash new password")))
+		return
+	}
+
+	if err := s.store.UpdateUser(ctx.Request.Context(), db.UpdateUserParams{
+		ID:                user.ID,
+		HashedPassword:    db.ToPgText(&hashedNewPassword),
+		PasswordChangedAt: db.ToPgTimestamptz(utils.GetCurrentTime()),
+	}); err != nil {
+		log.Printf("Failed to update user password: %v", err)
+		ctx.JSON(http.StatusInternalServerError, errorResponse(errors.New("failed to update user password")))
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"message": "Password updated successfully"})
+}
 
 func convertUserToResponse(user db.User) userResponse {
 	return userResponse{

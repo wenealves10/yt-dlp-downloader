@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
+import { bucketHost } from "../../constants/config";
+
 import { Settings, LogOut } from "lucide-react";
 import type { User } from "../../interface/User";
 import { useModalConfig } from "../../hooks/useModal";
@@ -26,14 +28,14 @@ export const UserMenu: React.FC<UserMenuProps> = ({ user, onLogout }) => {
   return (
     <div className="relative" ref={menuRef}>
       <button onClick={() => setIsOpen(!isOpen)}>
-        {user?.profile_url && (
+        {user?.photo_url && (
           <img
-            src={user.profile_url}
+            src={`${bucketHost}/${user.photo_url}`}
             alt="Avatar"
             className="w-10 h-10 rounded-full border-2 border-gray-600 hover:border-red-500 transition-colors"
           />
         )}
-        {!user?.profile_url && (
+        {!user?.photo_url && (
           <div className="w-10 h-10 cursor-pointer rounded-full bg-gray-600 flex items-center justify-center text-white">
             {user?.full_name?.charAt(0).toUpperCase() || "U"}
           </div>
