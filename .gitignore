@@ -35,3 +35,5 @@ go.work.sum
 */uploads/musics
 */bin/*
 docker-stack
+*cookies.txt
+test.sh

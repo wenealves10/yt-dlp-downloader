@@ -37,8 +37,8 @@ CREATE TABLE "users" (
   "daily_limit" INT NOT NULL DEFAULT 2,
   "last_login" TIMESTAMPTZ,
   "is_verified" BOOLEAN NOT NULL DEFAULT false,
-  "created_at" TIMESTAMPTZ NOT NULL DEFAULT 'now()',
-  "updated_at" TIMESTAMPTZ NOT NULL DEFAULT 'now()'
+  "created_at" TIMESTAMPTZ NOT NULL DEFAULT now(),
+  "updated_at" TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE TABLE "downloads" (
@@ -53,7 +53,7 @@ CREATE TABLE "downloads" (
   "expires_at" TIMESTAMPTZ DEFAULT null,
   "duration_seconds" INT DEFAULT 0,
   "error_message" TEXT DEFAULT null,
-  "created_at" TIMESTAMPTZ NOT NULL DEFAULT 'now()',
+  "created_at" TIMESTAMPTZ NOT NULL DEFAULT now(),
   "deleted_at" TIMESTAMPTZ DEFAULT null
 );
 

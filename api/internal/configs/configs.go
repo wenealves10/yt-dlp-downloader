@@ -48,6 +48,12 @@ type Config struct {
 
 	// Turnstile
 	TurnstileSecret string `mapstructure:"TURNSTILE_SECRET"`
+
+	// YouTube-DL configuration
+	YoutubeDLFileCookies string `mapstructure:"YOUTUBE_DL_FILE_COOKIES"`
+	YoutubeDLUserAgent   string `mapstructure:"YOUTUBE_DL_USER_AGENT"`
+	YoutubeDLReferer     string `mapstructure:"YOUTUBE_DL_REFERER"`
+	YoutubeDLAddHeader   string `mapstructure:"YOUTUBE_DL_ADD_HEADER"`
 }
 
 var LoadedConfig Config

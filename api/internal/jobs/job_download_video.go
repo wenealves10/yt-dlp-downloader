@@ -118,7 +118,12 @@ func (*JobDownloadVideo) downloadVideo(ctx context.Context, filename string, out
 			urlVideo,
 		)
 	} else {
-		cmd = exec.CommandContext(ctx, "yt-dlp",
+		cmd = exec.CommandContext(ctx,
+			"yt-dlp",
+			"--cookies", configs.LoadedConfig.YoutubeDLFileCookies,
+			"--user-agent", configs.LoadedConfig.YoutubeDLUserAgent,
+			"--referer", configs.LoadedConfig.YoutubeDLReferer,
+			"--add-header", configs.LoadedConfig.YoutubeDLAddHeader,
 			"-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4",
 			"--merge-output-format", "mp4",
 			"-o", outputFilePath,

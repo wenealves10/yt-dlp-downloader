@@ -120,6 +120,10 @@ func (*JobDownloadMusic) downloadMusic(ctx context.Context, filename string, out
 		)
 	} else {
 		cmd = exec.CommandContext(ctx, "yt-dlp",
+			"--cookies", configs.LoadedConfig.YoutubeDLFileCookies,
+			"--user-agent", configs.LoadedConfig.YoutubeDLUserAgent,
+			"--referer", configs.LoadedConfig.YoutubeDLReferer,
+			"--add-header", configs.LoadedConfig.YoutubeDLAddHeader,
 			"-x",
 			"--audio-format", "mp3",
 			"--audio-quality", "0",

@@ -20,13 +20,18 @@ type VideoInfo struct {
 }
 
 func GetVideoInfo(ctx context.Context, url string) (*VideoInfo, error) {
-
 	var cmd *exec.Cmd
 	if configs.LoadedConfig.ProxyEnabled {
 		proxyUrl := configs.LoadedConfig.ProxyURL
 		cmd = exec.CommandContext(ctx, "yt-dlp", "--proxy", proxyUrl, "--dump-json", url)
 	} else {
-		cmd = exec.CommandContext(ctx, "yt-dlp", "--dump-json", url)
+		cmd = exec.CommandContext(ctx,
+			"yt-dlp",
+			"--cookies", configs.LoadedConfig.YoutubeDLFileCookies,
+			"--user-agent", configs.LoadedConfig.YoutubeDLUserAgent,
+			"--referer", configs.LoadedConfig.YoutubeDLReferer,
+			"--add-header", configs.LoadedConfig.YoutubeDLAddHeader,
+			"--dump-json", url)
 	}
 
 	output, err := cmd.Output()
