@@ -30,7 +30,7 @@ func GetVideoInfo(ctx context.Context, url string) (*VideoInfo, error) {
 			"--cookies", configs.LoadedConfig.YoutubeDLFileCookies,
 			"--user-agent", configs.LoadedConfig.YoutubeDLUserAgent,
 			"--referer", configs.LoadedConfig.YoutubeDLReferer,
-			"--add-header", configs.LoadedConfig.YoutubeDLAddHeader,
+			"--add-header", "DNT: 1",
 			"--dump-json", url)
 	}
 

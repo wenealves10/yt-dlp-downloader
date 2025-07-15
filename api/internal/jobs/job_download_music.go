@@ -123,7 +123,7 @@ func (*JobDownloadMusic) downloadMusic(ctx context.Context, filename string, out
 			"--cookies", configs.LoadedConfig.YoutubeDLFileCookies,
 			"--user-agent", configs.LoadedConfig.YoutubeDLUserAgent,
 			"--referer", configs.LoadedConfig.YoutubeDLReferer,
-			"--add-header", configs.LoadedConfig.YoutubeDLAddHeader,
+			"--add-header", "DNT: 1",
 			"-x",
 			"--audio-format", "mp3",
 			"--audio-quality", "0",
