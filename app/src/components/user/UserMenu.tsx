@@ -29,10 +29,16 @@ export const UserMenu: React.FC<UserMenuProps> = ({ user, onLogout }) => {
     <div className="relative" ref={menuRef}>
       <button onClick={() => setIsOpen(!isOpen)}>
         {user?.photo_url && (
+          // <img
+          //   src={`${bucketHost}/${user.photo_url}`}
+          //   alt="Avatar"
+          //   className="w-10 h-10 rounded-full border-2 border-gray-600 hover:border-red-500 transition-colors"
+          // />
+
           <img
+            className="w-10 h-10 rounded-full border-2 border-gray-600 hover:border-red-500 transition-colors cursor-pointer"
             src={`${bucketHost}/${user.photo_url}`}
-            alt="Avatar"
-            className="w-10 h-10 rounded-full border-2 border-gray-600 hover:border-red-500 transition-colors"
+            alt="Avatar Profile"
           />
         )}
         {!user?.photo_url && (
