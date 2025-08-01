@@ -1,6 +1,8 @@
 package server
 
 import (
+	"database/sql"
+	"errors"
 	"log"
 	"net/http"
 	"strconv"
@@ -60,10 +62,38 @@ func (s *Server) createDownload(ctx *gin.Context) {
 		return
 	}
 
+	user, err := s.store.GetUserByID(ctx.Request.Context(), userID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			ctx.JSON(http.StatusNotFound, errorResponse(errors.New("user not found")))
+			return
+		}
+		ctx.JSON(http.StatusInternalServerError, errorResponse(err))
+		return
+	}
+
 	videoInfo, err := helpers.GetVideoInfo(ctx, req.URL)
 	if err != nil {
 		log.Printf("Failed to get video info: %v", err)
 		ctx.JSON(400, gin.H{"error": "Invalid URL or unsupported format"})
+		return
+	}
+
+	if user.Plan == db.CorePlanTypeFree && videoInfo.FileSizeBytes > s.config.LimitDownloadFree {
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"code":    "limit_exceeded",
+			"message": "Download size exceeds limit for free plan",
+			"limit":   s.config.LimitDownloadFree,
+			"size":    videoInfo.FileSizeBytes,
+		})
+		return
+	} else if user.Plan == db.CorePlanTypePremium && videoInfo.FileSizeBytes > s.config.LimitDownloadPremium {
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"code":    "limit_exceeded",
+			"message": "Download size exceeds limit for premium plan",
+			"limit":   s.config.LimitDownloadPremium,
+			"size":    videoInfo.FileSizeBytes,
+		})
 		return
 	}
 

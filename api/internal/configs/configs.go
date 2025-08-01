@@ -54,6 +54,8 @@ type Config struct {
 	YoutubeDLUserAgent   string `mapstructure:"YOUTUBE_DL_USER_AGENT"`
 	YoutubeDLReferer     string `mapstructure:"YOUTUBE_DL_REFERER"`
 	YoutubeDLAddHeader   string `mapstructure:"YOUTUBE_DL_ADD_HEADER"`
+	LimitDownloadFree    int64  `mapstructure:"LIMIT_DOWNLOAD_FREE"`
+	LimitDownloadPremium int64  `mapstructure:"LIMIT_DOWNLOAD_PREMIUM"`
 }
 
 var LoadedConfig Config

@@ -138,8 +138,10 @@ export const DownloaderPage: React.FC = () => {
           downloadsQuery.refetch();
           refetch();
         },
-        onError: () => {
-          setError("Erro ao processar o download.");
+        onError: (error) => {
+          const errorMessage =
+            error instanceof Error ? error.message : "Erro ao baixar o vídeo.";
+          setError(errorMessage);
         },
       }
     );
@@ -186,7 +188,16 @@ export const DownloaderPage: React.FC = () => {
                   `}
               />
             </div>
-            {error && <p className="text-red-400 text-sm mb-4">{error}</p>}
+            {error && (
+              <p className="text-red-500 text-sm mb-4">
+                {error.split("\n").map((line, i) => (
+                  <span key={i}>
+                    {line}
+                    <br />
+                  </span>
+                ))}
+              </p>
+            )}
             <div className="flex flex-col sm:flex-row items-center gap-4">
               <div className="flex-grow w-full sm:w-auto flex items-stretch gap-2 p-1 bg-gray-900 rounded-lg">
                 <button
