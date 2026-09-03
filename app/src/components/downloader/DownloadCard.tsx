@@ -16,7 +16,6 @@ interface Job {
   status: "queue" | "processing" | "complete" | "expired" | "error";
   format: string;
   thumbnail?: string;
-  downloadUrl?: string;
   completedAt?: number;
   durationSeconds?: number;
   summary?: string;
@@ -42,11 +41,13 @@ export function formatSeconds(seconds: number): string {
 
 interface DownloadCardProps {
   job: Job;
+  onDownload: (id: string) => void;
   onRemove: (id: string) => void;
 }
 
 export const DownloadCard: React.FC<DownloadCardProps> = ({
   job,
+  onDownload,
   onRemove,
 }) => {
   const [timeLeft, setTimeLeft] = useState("");
@@ -110,14 +111,14 @@ export const DownloadCard: React.FC<DownloadCardProps> = ({
         <div className="flex-shrink-0 flex flex-col items-center gap-2 w-full md:w-auto">
           {job.status === "complete" && (
             <>
-              <a
-                href={job.downloadUrl || "#"}
-                download
+              <button
+                type="button"
+                onClick={() => onDownload(job.id)}
                 className="w-full md:w-auto flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition-colors"
               >
                 <Download size={16} />
                 <span>Baixar</span>
-              </a>
+              </button>
               <p className="text-xs text-yellow-400 font-mono">
                 Expira em: {timeLeft}
               </p>

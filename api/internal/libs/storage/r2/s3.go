@@ -81,6 +81,29 @@ func (s *s3Service) DownloadFile(ctx context.Context, objectKey, downloadPath st
 	return nil
 }
 
+// OpenFile returns the R2 object body without writing it to local disk. This
+// lets the API proxy the file to the browser as a download.
+func (s *s3Service) OpenFile(ctx context.Context, objectKey string) (storage.FileStream, error) {
+	object, err := s.client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(s.bucketName),
+		Key:    aws.String(objectKey),
+	})
+	if err != nil {
+		return storage.FileStream{}, fmt.Errorf("failed to open file: %w", err)
+	}
+
+	contentLength := int64(-1)
+	if object.ContentLength != nil {
+		contentLength = *object.ContentLength
+	}
+
+	return storage.FileStream{
+		Body:          object.Body,
+		ContentLength: contentLength,
+		ContentType:   aws.ToString(object.ContentType),
+	}, nil
+}
+
 func (s *s3Service) DeleteFile(ctx context.Context, objectKey string) error {
 	_, err := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{
 		Bucket: aws.String(s.bucketName),

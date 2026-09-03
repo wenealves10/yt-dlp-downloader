@@ -90,8 +90,14 @@ func (server *Server) setupRouter() {
 	// downloads routes
 	authRoutes.GET("/downloads", server.getDownloads)
 	authRoutes.GET("/downloads/daily", server.getDailyDownloads)
+	authRoutes.GET("/downloads/:id/file", server.downloadFile)
 	authRoutes.DELETE("/downloads/:id", server.deleteDownload)
 	authLimitedRoutes.POST("/downloads", server.createDownload)
+	// A regular browser navigation cannot include an Authorization header. The
+	// form route receives the bearer token in the POST body and streams an
+	// attachment, allowing Safari and other browsers to start the download
+	// without navigating to the R2 public URL.
+	groupV1.POST("/downloads/:id/file", formAuthMiddleware(server.tokenCreator, server.store), server.downloadFile)
 
 	// SSE route
 	groupV1.GET("/sse", server.sseHandler())

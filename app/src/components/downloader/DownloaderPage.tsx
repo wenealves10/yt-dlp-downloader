@@ -4,7 +4,7 @@ import { UserMenu } from "../user/UserMenu";
 import { DownloadCard } from "./DownloadCard";
 import { useAuth } from "../../hooks/useAuth";
 import { useQuery } from "@tanstack/react-query";
-import { getData } from "../../api/getData";
+import { getData, startFileDownload } from "../../api/getData";
 import { bucketHost } from "../../constants/config";
 import { DownloadCounter } from "./DownloadCounter";
 import {
@@ -21,7 +21,6 @@ interface Job {
   status: "queue" | "processing" | "complete" | "expired" | "error";
   format: string;
   thumbnail?: string;
-  downloadUrl?: string;
   durationSeconds?: number;
   completedAt?: number;
   expiresAt?: string | null;
@@ -79,7 +78,6 @@ export const DownloaderPage: React.FC = () => {
         thumbnail: item.thumbnail_url?.includes("http")
           ? ""
           : `${bucketHost}/${item.thumbnail_url}`,
-        downloadUrl: `${bucketHost}/${item.file_url}`,
         completedAt: new Date(item.created_at).getTime(),
         expiresAt: item.expires_at,
       }));
@@ -104,7 +102,6 @@ export const DownloaderPage: React.FC = () => {
             thumbnail: data?.thumbnail_url
               ? `${bucketHost}/${data.thumbnail_url}`
               : updatedJobs[existingIndex].thumbnail,
-            downloadUrl: data?.file_url ? `${bucketHost}/${data.file_url}` : "",
             expiresAt: data.expires_at || updatedJobs[existingIndex].expiresAt,
           };
           return updatedJobs;
@@ -151,6 +148,14 @@ export const DownloaderPage: React.FC = () => {
   const handleRemoveJob = (id: string) => {
     deleteDownload.mutate(id);
     setJobs((prev) => prev.filter((job) => job.id !== id));
+  };
+
+  const handleFileDownload = (id: string) => {
+    if (!token) {
+      setError("Sua sessão expirou. Entre novamente para baixar o arquivo.");
+      return;
+    }
+    startFileDownload(id, token);
   };
 
   return (
@@ -257,6 +262,7 @@ export const DownloaderPage: React.FC = () => {
                 <DownloadCard
                   key={job.id}
                   job={job}
+                  onDownload={handleFileDownload}
                   onRemove={handleRemoveJob}
                 />
               ))}

@@ -4,8 +4,11 @@ import (
 	"database/sql"
 	"errors"
 	"log"
+	"mime"
 	"net/http"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -257,6 +260,94 @@ func (s *Server) getDailyDownloads(ctx *gin.Context) {
 		"daily_limit":     user.DailyLimit,
 		"remaining":       int64(user.DailyLimit) - dailyDownloads,
 	})
+}
+
+// downloadFile proxies a completed file from R2 and forces the browser to
+// treat it as an attachment. This keeps the user on the app and avoids public
+// bucket redirects or in-browser playback.
+func (s *Server) downloadFile(ctx *gin.Context) {
+	authPayload := ctx.MustGet(authorizationPayloadKey).(*tokens.Payload)
+	userID, err := utils.ParseUUID(authPayload.UserID)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
+		return
+	}
+
+	downloadID, err := utils.ParseUUID(ctx.Param("id"))
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid download ID"})
+		return
+	}
+
+	download, err := s.store.GetDownloadByID(ctx.Request.Context(), downloadID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			ctx.JSON(http.StatusNotFound, gin.H{"error": "Download not found"})
+			return
+		}
+		log.Printf("Failed to get download %s: %v", downloadID, err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get download"})
+		return
+	}
+
+	if download.UserID != userID {
+		ctx.JSON(http.StatusForbidden, gin.H{"error": "You do not have permission to download this file"})
+		return
+	}
+
+	if download.Status != db.CoreDownloadStatusCOMPLETED || !download.FileUrl.Valid || download.FileUrl.String == "" {
+		ctx.JSON(http.StatusConflict, gin.H{"error": "Download is not ready yet"})
+		return
+	}
+
+	if download.ExpiresAt.Valid && !download.ExpiresAt.Time.After(time.Now()) {
+		ctx.JSON(http.StatusGone, gin.H{"error": "Download has expired"})
+		return
+	}
+
+	file, err := s.storage.OpenFile(ctx.Request.Context(), download.FileUrl.String)
+	if err != nil {
+		log.Printf("Failed to open download %s from storage: %v", downloadID, err)
+		ctx.JSON(http.StatusBadGateway, gin.H{"error": "Failed to retrieve download file"})
+		return
+	}
+	defer file.Body.Close()
+
+	contentType := file.ContentType
+	if contentType == "" {
+		contentType = mime.TypeByExtension("." + strings.ToLower(string(download.Format)))
+	}
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+
+	filename := downloadFilename(download.Title, string(download.Format))
+	ctx.DataFromReader(http.StatusOK, file.ContentLength, contentType, file.Body, map[string]string{
+		"Cache-Control":          "no-store",
+		"Content-Disposition":    mime.FormatMediaType("attachment", map[string]string{"filename": filename}),
+		"X-Content-Type-Options": "nosniff",
+	})
+}
+
+func downloadFilename(title, format string) string {
+	filename := strings.TrimSpace(title)
+	filename = strings.Map(func(r rune) rune {
+		switch r {
+		case '/', '\\', '\x00', '\r', '\n':
+			return '_'
+		default:
+			return r
+		}
+	}, filename)
+	if filename == "" || filename == "." {
+		filename = "download"
+	}
+
+	extension := "." + strings.ToLower(format)
+	if filepath.Ext(filename) == "" && extension != "." {
+		filename += extension
+	}
+	return filename
 }
 
 func (s *Server) deleteDownload(ctx *gin.Context) {
