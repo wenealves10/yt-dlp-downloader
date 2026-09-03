@@ -4,43 +4,42 @@ import type {
 } from "../interface/Download";
 
 const apiUrl = import.meta.env.VITE_API_URL;
-const downloadFrameName = "download-proxy-frame";
 
-function ensureDownloadFrame(): void {
-  if (document.querySelector(`iframe[name="${downloadFrameName}"]`)) {
-    return;
+type DownloadURLResponse = {
+  url?: string;
+  error?: string;
+};
+
+// The application API authenticates the user and returns a short-lived R2
+// presigned URL. We never construct a bucket URL in the browser, so private
+// objects cannot be requested merely by guessing their key.
+export async function startFileDownload(
+  downloadId: string,
+  token: string
+): Promise<void> {
+  const response = await fetch(
+    `${apiUrl}/v1/downloads/${encodeURIComponent(downloadId)}/download-url`,
+    {
+      method: "GET",
+      headers: { Authorization: `Bearer ${token}` },
+    }
+  );
+  const body = (await response.json().catch(() => ({}))) as DownloadURLResponse;
+
+  if (!response.ok) {
+    throw new Error(body.error || "Não foi possível preparar o download.");
+  }
+  if (!body.url) {
+    throw new Error("A API não retornou uma URL de download válida.");
   }
 
-  const frame = document.createElement("iframe");
-  frame.name = downloadFrameName;
-  frame.title = "Download";
-  frame.hidden = true;
-  document.body.appendChild(frame);
-}
-
-// A native form POST lets the browser consume the attachment response as soon
-// as the API starts streaming it. It is targeted to a hidden frame so an API
-// error never replaces the downloader page with a 404 response. Unlike a
-// direct R2 link, it never asks the bucket domain to display or redirect the
-// file.
-export function startFileDownload(downloadId: string, token: string): void {
-  ensureDownloadFrame();
-
-  const form = document.createElement("form");
-  form.method = "POST";
-  form.action = `${apiUrl}/v1/downloads/${encodeURIComponent(downloadId)}/file`;
-  form.target = downloadFrameName;
-  form.style.display = "none";
-
-  const accessToken = document.createElement("input");
-  accessToken.type = "hidden";
-  accessToken.name = "access_token";
-  accessToken.value = token;
-  form.appendChild(accessToken);
-
-  document.body.appendChild(form);
-  form.submit();
-  form.remove();
+  const link = document.createElement("a");
+  link.href = body.url;
+  link.style.display = "none";
+  link.referrerPolicy = "no-referrer";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
 }
 
 export function getData(token: string) {

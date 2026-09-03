@@ -67,6 +67,11 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetConfigName(".env")
 	viper.SetConfigType("env")
 	viper.AutomaticEnv()
+	// Garante que variáveis fornecidas pelo ambiente (por exemplo, pelo
+	// compose.dev.yaml) tenham precedência sobre os valores de .env. Assim o
+	// desenvolvimento usa banco e Redis locais sem duplicar as credenciais do
+	// R2 já presentes no arquivo de configuração.
+	bindEnvVariables(&config)
 
 	if _, err := os.Stat(path + "/.env"); err == nil {
 		err = viper.ReadInConfig()
@@ -75,7 +80,6 @@ func LoadConfig(path string) (Config, error) {
 		}
 	} else {
 		fmt.Println("⚠️ Arquivo .env não encontrado, usando apenas variáveis de ambiente")
-		bindEnvVariables(&config)
 	}
 
 	err := viper.Unmarshal(&config)

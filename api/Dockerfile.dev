@@ -1,0 +1,25 @@
+FROM golang:1.23.2-bookworm
+
+WORKDIR /workspace
+
+ARG YT_DLP_VERSION=2026.8.19
+
+# Dependências de execução do worker. Este Dockerfile é utilizado somente pelo
+# compose.dev.yaml; os Dockerfiles de produção permanecem inalterados.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        ffmpeg \
+        python3 \
+        python3-pip \
+        python3-venv \
+    && python3 -m venv /opt/venv \
+    && /opt/venv/bin/pip install --no-cache-dir --upgrade pip \
+    && /opt/venv/bin/pip install --no-cache-dir "yt-dlp[default]==${YT_DLP_VERSION}" \
+    && /opt/venv/bin/yt-dlp --version \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV PATH="/opt/venv/bin:${PATH}"
+
+COPY go.mod go.sum ./
+RUN go mod download

@@ -72,6 +72,54 @@ yt-dlp-downloader/
      -d '{ "url": "https://youtube.com/watch?v=dQw4w9WgXcQ" }'
    ```
 
+## 🐳 Ambiente de desenvolvimento com Docker
+
+O ambiente local é isolado em `compose.dev.yaml`: cria PostgreSQL, Redis, API,
+worker e o app Vite. Ele usa volumes e portas de desenvolvimento próprios. O
+armazenamento de arquivos continua usando o Cloudflare R2 já definido em
+`api/.env` e `app/.env.local`; nenhum MinIO é criado.
+
+`api/.env` é a fonte única das variáveis de Redis e PostgreSQL: o `make dev`
+passa esse arquivo ao Compose e ele também é carregado pela API e pelo worker.
+Para o Compose, mantenha os nomes e portas internos (`REDIS_HOST=redis`,
+`REDIS_PORT=6379`, `DB_HOST=postgres` e `DB_PORT=5432`), além do `DB_SOURCE`
+com o host `postgres`. As portas `5433` e `6380` abaixo são apenas os acessos
+equivalentes a partir da máquina host.
+
+Se o arquivo ainda não existir, comece pelo modelo e preencha as variáveis do
+Cloudflare R2 que forem necessárias:
+
+```bash
+cp api/.env.example api/.env
+```
+
+```bash
+make dev
+```
+
+O comando pode ser executado novamente. As migrations pendentes são aplicadas
+automaticamente e as já aplicadas são ignoradas. Os endereços padrão são:
+
+- App: `http://localhost:5173`
+- API: `http://localhost:8081`
+- PostgreSQL: `localhost:5433`
+- Redis: `localhost:6380`
+
+As portas podem ser alteradas sem editar arquivos, por exemplo:
+
+```bash
+DEV_APP_PORT=5174 DEV_API_PORT=8082 make dev
+```
+
+Comandos úteis:
+
+```bash
+make help
+make dev-logs
+make dev-migrate
+make dev-down
+```
+
 ---
 
 ## 📌 Próximas Melhorias

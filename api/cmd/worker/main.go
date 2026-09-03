@@ -80,14 +80,14 @@ func main() {
 	srv := asynq.NewServer(
 		asynqRedisOpt,
 		asynq.Config{
-			Concurrency: queues.Concurrency,
+			Concurrency: queues.WorkerConcurrency,
 			Queues: map[string]int{
-				queues.TypeDownloadVideoQueue:      queues.ConcurrencyDownloadVideo,
-				queues.TypeDownloadMusicQueue:      queues.ConcurrencyDownloadMusic,
-				queues.TypeUploadVideoQueue:        queues.ConcurrencyUploadVideo,
-				queues.TypeUploadMusicQueue:        queues.ConcurrencyUploadMusic,
-				queues.TypeDownloadExpirationQueue: queues.ConcurrencyFileExpiration,
-				queues.TypeDeleteDownloadQueue:     queues.ConcurrencyDeleteDownload,
+				queues.TypeDownloadVideoQueue:      queues.QueueWeightDownloadVideo,
+				queues.TypeDownloadMusicQueue:      queues.QueueWeightDownloadMusic,
+				queues.TypeUploadVideoQueue:        queues.QueueWeightUploadVideo,
+				queues.TypeUploadMusicQueue:        queues.QueueWeightUploadMusic,
+				queues.TypeDownloadExpirationQueue: queues.QueueWeightFileExpiration,
+				queues.TypeDeleteDownloadQueue:     queues.QueueWeightDeleteDownload,
 			},
 		},
 	)
@@ -104,7 +104,7 @@ func main() {
 	mux.Handle(tasks.TypeUploadMusic, jobs.NewJobUploadMusic(asynqClient, r2Storage, store, rdStream))
 	mux.Handle(tasks.TypeDeleteDownload, jobs.NewJobDeleteDownload(asynqClient, r2Storage, store))
 	mux.Handle(tasks.TypeDownloadExpiration, jobs.NewJobDownloadExpiration(asynqClient, store))
-	log.Printf("Starting worker server on %s", redisAddr)
+	log.Printf("Starting worker server on %s with a maximum of %d concurrent tasks", redisAddr, queues.WorkerConcurrency)
 
 	if err := srv.Run(mux); err != nil {
 		log.Fatalf("could not run server: %v", err)

@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"io"
+	"time"
 )
 
 // FileStream is an object read directly from the backing storage. Callers must
@@ -18,5 +19,9 @@ type Storage interface {
 	UploadFileByte(ctx context.Context, fileData []byte, objectKey string) error
 	DownloadFile(ctx context.Context, objectKey, downloadPath string) error
 	OpenFile(ctx context.Context, objectKey string) (FileStream, error)
+	// PresignDownload creates a short-lived, signed R2 URL for a single
+	// object. The caller must authenticate and authorize the user before
+	// requesting it; this method must never be exposed as a public endpoint.
+	PresignDownload(ctx context.Context, objectKey, filename, contentType string, expiresIn time.Duration) (string, error)
 	DeleteFile(ctx context.Context, objectKey string) error
 }

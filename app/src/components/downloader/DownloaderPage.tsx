@@ -53,6 +53,7 @@ export const DownloaderPage: React.FC = () => {
   const [format, setFormat] = useState("video");
   const [jobs, setJobs] = useState<Job[]>([]);
   const [error, setError] = useState("");
+  const [downloadingJobID, setDownloadingJobID] = useState<string | null>(null);
   const [page] = useState(1);
   const [perPage] = useState(10);
   const { remaining, refetch } = useDownloads();
@@ -150,12 +151,23 @@ export const DownloaderPage: React.FC = () => {
     setJobs((prev) => prev.filter((job) => job.id !== id));
   };
 
-  const handleFileDownload = (id: string) => {
+  const handleFileDownload = async (id: string) => {
     if (!token) {
       setError("Sua sessão expirou. Entre novamente para baixar o arquivo.");
       return;
     }
-    startFileDownload(id, token);
+
+    setError("");
+    setDownloadingJobID(id);
+    try {
+      await startFileDownload(id, token);
+    } catch (error) {
+      setError(
+        error instanceof Error ? error.message : "Não foi possível iniciar o download."
+      );
+    } finally {
+      setDownloadingJobID(null);
+    }
   };
 
   return (
@@ -264,6 +276,7 @@ export const DownloaderPage: React.FC = () => {
                   job={job}
                   onDownload={handleFileDownload}
                   onRemove={handleRemoveJob}
+                  isDownloading={downloadingJobID === job.id}
                 />
               ))}
             </div>

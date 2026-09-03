@@ -43,12 +43,14 @@ interface DownloadCardProps {
   job: Job;
   onDownload: (id: string) => void;
   onRemove: (id: string) => void;
+  isDownloading?: boolean;
 }
 
 export const DownloadCard: React.FC<DownloadCardProps> = ({
   job,
   onDownload,
   onRemove,
+  isDownloading = false,
 }) => {
   const [timeLeft, setTimeLeft] = useState("");
   const [openModal, setOpenModal] = useState(false);
@@ -114,10 +116,11 @@ export const DownloadCard: React.FC<DownloadCardProps> = ({
               <button
                 type="button"
                 onClick={() => onDownload(job.id)}
-                className="w-full md:w-auto flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition-colors"
+                disabled={isDownloading}
+                className="w-full md:w-auto flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800 disabled:cursor-wait text-white font-bold py-2 px-4 rounded-lg transition-colors"
               >
                 <Download size={16} />
-                <span>Baixar</span>
+                <span>{isDownloading ? "Preparando..." : "Baixar"}</span>
               </button>
               <p className="text-xs text-yellow-400 font-mono">
                 Expira em: {timeLeft}

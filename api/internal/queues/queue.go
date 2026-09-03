@@ -14,15 +14,20 @@ const (
 )
 
 const (
-	Concurrency                 = 100
-	ConcurrencyDownloadVideo    = 30
-	ConcurrencyDownloadMusic    = 60
-	ConcurrencyUploadVideo      = 20
-	ConcurrencyUploadMusic      = 40
-	ConcurrencyResumeVideo      = 10
-	ConcurrencyResumeMusic      = 20
-	ConcurrencyCreateTweetVideo = 10
-	ConcurrencyCreateTweetMusic = 10
-	ConcurrencyFileExpiration   = 1
-	ConcurrencyDeleteDownload   = 10
+	// WorkerConcurrency is the global ceiling for a single worker process.
+	// Tasks above this limit remain queued in Redis until a slot is available.
+	WorkerConcurrency = 20
+
+	// Queue weights define how often each queue is selected; they do not grant
+	// additional concurrency beyond WorkerConcurrency.
+	QueueWeightDownloadVideo    = 30
+	QueueWeightDownloadMusic    = 60
+	QueueWeightUploadVideo      = 20
+	QueueWeightUploadMusic      = 40
+	QueueWeightResumeVideo      = 10
+	QueueWeightResumeMusic      = 20
+	QueueWeightCreateTweetVideo = 10
+	QueueWeightCreateTweetMusic = 10
+	QueueWeightFileExpiration   = 1
+	QueueWeightDeleteDownload   = 10
 )

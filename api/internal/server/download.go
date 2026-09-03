@@ -29,6 +29,7 @@ type DownloadType string
 const (
 	DownloadTypeVideo DownloadType = "video"
 	DownloadTypeMusic DownloadType = "music"
+	downloadURLTTL                 = time.Minute
 )
 
 type downloadRequest struct {
@@ -262,52 +263,99 @@ func (s *Server) getDailyDownloads(ctx *gin.Context) {
 	})
 }
 
-// downloadFile proxies a completed file from R2 and forces the browser to
-// treat it as an attachment. This keeps the user on the app and avoids public
-// bucket redirects or in-browser playback.
-func (s *Server) downloadFile(ctx *gin.Context) {
+// authorizedCompletedDownload loads a download after checking both ownership
+// and availability. It keeps all download delivery paths from ever accepting
+// an object key supplied by the browser.
+func (s *Server) authorizedCompletedDownload(ctx *gin.Context) (db.Download, bool) {
 	authPayload := ctx.MustGet(authorizationPayloadKey).(*tokens.Payload)
 	userID, err := utils.ParseUUID(authPayload.UserID)
 	if err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
-		return
+		return db.Download{}, false
 	}
 
 	downloadID, err := utils.ParseUUID(ctx.Param("id"))
 	if err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid download ID"})
-		return
+		return db.Download{}, false
 	}
 
 	download, err := s.store.GetDownloadByID(ctx.Request.Context(), downloadID)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			ctx.JSON(http.StatusNotFound, gin.H{"error": "Download not found"})
-			return
+			return db.Download{}, false
 		}
 		log.Printf("Failed to get download %s: %v", downloadID, err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get download"})
-		return
+		return db.Download{}, false
 	}
 
 	if download.UserID != userID {
 		ctx.JSON(http.StatusForbidden, gin.H{"error": "You do not have permission to download this file"})
-		return
+		return db.Download{}, false
 	}
 
 	if download.Status != db.CoreDownloadStatusCOMPLETED || !download.FileUrl.Valid || download.FileUrl.String == "" {
 		ctx.JSON(http.StatusConflict, gin.H{"error": "Download is not ready yet"})
-		return
+		return db.Download{}, false
 	}
 
 	if download.ExpiresAt.Valid && !download.ExpiresAt.Time.After(time.Now()) {
 		ctx.JSON(http.StatusGone, gin.H{"error": "Download has expired"})
+		return db.Download{}, false
+	}
+
+	return download, true
+}
+
+// downloadURL first authenticates the account in the API and only then creates
+// a one-minute signed R2 URL. The URL is never stored, returned in the history
+// payload, or derived from the browser-provided object key.
+func (s *Server) downloadURL(ctx *gin.Context) {
+	download, ok := s.authorizedCompletedDownload(ctx)
+	if !ok {
+		return
+	}
+
+	contentType := mime.TypeByExtension("." + strings.ToLower(string(download.Format)))
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+
+	filename := downloadFilename(download.Title, string(download.Format))
+	presignedURL, err := s.storage.PresignDownload(
+		ctx.Request.Context(),
+		download.FileUrl.String,
+		filename,
+		contentType,
+		downloadURLTTL,
+	)
+	if err != nil {
+		log.Printf("Failed to create R2 download URL for %s: %v", download.ID, err)
+		ctx.JSON(http.StatusBadGateway, gin.H{"error": "Failed to prepare download"})
+		return
+	}
+
+	ctx.Header("Cache-Control", "no-store")
+	ctx.JSON(http.StatusOK, gin.H{
+		"url":        presignedURL,
+		"expires_at": time.Now().Add(downloadURLTTL).UTC().Format(time.RFC3339),
+	})
+}
+
+// downloadFile is retained for authenticated API clients that need the API to
+// stream bytes. The web UI uses downloadURL instead, which keeps large file
+// transfers in R2 while still requiring an API authorization check first.
+func (s *Server) downloadFile(ctx *gin.Context) {
+	download, ok := s.authorizedCompletedDownload(ctx)
+	if !ok {
 		return
 	}
 
 	file, err := s.storage.OpenFile(ctx.Request.Context(), download.FileUrl.String)
 	if err != nil {
-		log.Printf("Failed to open download %s from storage: %v", downloadID, err)
+		log.Printf("Failed to open download %s from storage: %v", download.ID, err)
 		ctx.JSON(http.StatusBadGateway, gin.H{"error": "Failed to retrieve download file"})
 		return
 	}

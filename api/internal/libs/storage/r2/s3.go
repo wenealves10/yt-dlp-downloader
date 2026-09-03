@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"mime"
 	"os"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
@@ -13,14 +15,16 @@ import (
 )
 
 type s3Service struct {
-	client     *s3.Client
-	bucketName string
+	client        *s3.Client
+	presignClient *s3.PresignClient
+	bucketName    string
 }
 
 func NewS3Service(client *s3.Client, bucket string) storage.Storage {
 	return &s3Service{
-		client:     client,
-		bucketName: bucket,
+		client:        client,
+		presignClient: s3.NewPresignClient(client),
+		bucketName:    bucket,
 	}
 }
 
@@ -102,6 +106,30 @@ func (s *s3Service) OpenFile(ctx context.Context, objectKey string) (storage.Fil
 		ContentLength: contentLength,
 		ContentType:   aws.ToString(object.ContentType),
 	}, nil
+}
+
+// PresignDownload creates a GET URL authenticated by R2's S3 signature. It is
+// deliberately short lived and includes the attachment headers in the signed
+// request, so a caller cannot change the filename or force an inline response.
+func (s *s3Service) PresignDownload(ctx context.Context, objectKey, filename, contentType string, expiresIn time.Duration) (string, error) {
+	contentDisposition := mime.FormatMediaType("attachment", map[string]string{"filename": filename})
+	input := &s3.GetObjectInput{
+		Bucket:                     aws.String(s.bucketName),
+		Key:                        aws.String(objectKey),
+		ResponseContentDisposition: aws.String(contentDisposition),
+	}
+	if contentType != "" {
+		input.ResponseContentType = aws.String(contentType)
+	}
+
+	presigned, err := s.presignClient.PresignGetObject(ctx, input, func(options *s3.PresignOptions) {
+		options.Expires = expiresIn
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to presign download: %w", err)
+	}
+
+	return presigned.URL, nil
 }
 
 func (s *s3Service) DeleteFile(ctx context.Context, objectKey string) error {

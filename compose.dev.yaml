@@ -1,0 +1,147 @@
+name: yt-dlp-downloader-dev
+
+# Ambiente exclusivamente local. PostgreSQL e Redis não compartilham portas ou
+# volumes com produção. As credenciais e a configuração de conexão são lidas
+# de api/.env pelo Makefile, para não haver divergência entre API, worker e
+# serviços do Compose. O armazenamento de arquivos continua no Cloudflare R2
+# já configurado em api/.env.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${DB_NAME:?Defina DB_NAME em api/.env}
+      POSTGRES_USER: ${DB_USER:?Defina DB_USER em api/.env}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Defina DB_PASSWORD em api/.env}
+    ports:
+      - "${DEV_POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - dev_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${DB_USER:?Defina DB_USER em api/.env} -d ${DB_NAME:?Defina DB_NAME em api/.env}",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    command:
+      [
+        "redis-server",
+        "--appendonly",
+        "yes",
+        "--requirepass",
+        "${REDIS_PASSWORD:?Defina REDIS_PASSWORD em api/.env}",
+      ]
+    ports:
+      - "${DEV_REDIS_PORT:-6380}:6379"
+    volumes:
+      - dev_redis_data:/data
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "redis-cli",
+          "-a",
+          "${REDIS_PASSWORD:?Defina REDIS_PASSWORD em api/.env}",
+          "ping",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  migrate:
+    image: migrate/migrate:v4.18.3
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./api/sql/migrations:/migrations:ro
+    command:
+      - -path=/migrations
+      - -database=${DB_SOURCE:?Defina DB_SOURCE em api/.env}
+      - -verbose
+      - up
+
+  server:
+    build:
+      context: ./api
+      dockerfile: Dockerfile.dev
+    working_dir: /workspace
+    command: go run ./cmd/server/main.go
+    env_file:
+      - ./api/.env
+    environment:
+      ENV: development
+      GIN_MODE: debug
+      SERVER_ADDRESS: 0.0.0.0:8080
+      TURNSTILE_SECRET: 1x0000000000000000000000000000000AA
+    ports:
+      - "${DEV_API_PORT:-8081}:8080"
+    volumes:
+      - ./api:/workspace
+      - dev_go_module_cache:/go/pkg/mod
+      - dev_go_build_cache:/root/.cache/go-build
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  worker:
+    build:
+      context: ./api
+      dockerfile: Dockerfile.dev
+    working_dir: /workspace
+    command: go run ./cmd/worker/main.go
+    env_file:
+      - ./api/.env
+    environment:
+      ENV: development
+    volumes:
+      - ./api:/workspace
+      - dev_api_uploads:/workspace/uploads
+      - dev_go_module_cache:/go/pkg/mod
+      - dev_go_build_cache:/root/.cache/go-build
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  app:
+    build:
+      context: ./app
+      dockerfile: Dockerfile.dev
+    working_dir: /workspace
+    command: >-
+      sh -ec 'if [ ! -x node_modules/.bin/vite ]; then npm ci; fi;
+      exec npm run dev -- --host 0.0.0.0'
+    environment:
+      VITE_API_URL: https://yt-api.wene.com.br
+      VITE_SITE_KEY: 1x00000000000000000000AA
+    ports:
+      - "${DEV_APP_PORT:-5173}:5173"
+    volumes:
+      - ./app:/workspace
+      - dev_app_node_modules:/workspace/node_modules
+      - dev_npm_cache:/root/.npm
+    depends_on:
+      server:
+        condition: service_started
+
+volumes:
+  dev_postgres_data:
+  dev_redis_data:
+  dev_go_module_cache:
+  dev_go_build_cache:
+  dev_api_uploads:
+  dev_app_node_modules:
+  dev_npm_cache:

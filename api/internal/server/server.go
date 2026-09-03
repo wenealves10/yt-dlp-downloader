@@ -91,6 +91,7 @@ func (server *Server) setupRouter() {
 	authRoutes.GET("/downloads", server.getDownloads)
 	authRoutes.GET("/downloads/daily", server.getDailyDownloads)
 	authRoutes.GET("/downloads/:id/file", server.downloadFile)
+	authRoutes.GET("/downloads/:id/download-url", server.downloadURL)
 	authRoutes.DELETE("/downloads/:id", server.deleteDownload)
 	authLimitedRoutes.POST("/downloads", server.createDownload)
 	// A regular browser navigation cannot include an Authorization header. The
