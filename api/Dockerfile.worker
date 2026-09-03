@@ -20,6 +20,8 @@ FROM debian:bookworm-slim
 
 WORKDIR /app
 
+ARG YT_DLP_VERSION=2026.8.19
+
 # Instalar apenas o necessário para rodar yt-dlp
 RUN apt-get update && apt-get install -y \
     python3 \
@@ -29,7 +31,8 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     && python3 -m venv /opt/venv \
     && /opt/venv/bin/pip install --upgrade pip \
-    && /opt/venv/bin/pip install yt-dlp \
+    && /opt/venv/bin/pip install "yt-dlp[default]==${YT_DLP_VERSION}" \
+    && /opt/venv/bin/yt-dlp --version \
     && rm -rf /var/lib/apt/lists/*
 
 ENV PATH="/opt/venv/bin:$PATH"
