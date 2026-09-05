@@ -1,0 +1,90 @@
+# Serviço de navegador remoto (advideo-browser).
+#
+# É o único container que executa um navegador. Ele não publica portas: só é
+# alcançável pela rede interna do Docker e exige o segredo compartilhado em
+# todas as rotas. Os perfis persistentes ficam em /data/profiles, que deve ser
+# um volume nomeado.
+
+# Etapa 1: Build
+FROM golang:1.23.2 AS builder
+
+ENV GO111MODULE=on \
+    GOOS=linux
+# GOARCH não é fixado: a imagem é construída no próprio servidor, e o servidor é
+# ARM. Com GOARCH=amd64 o binário sairia x86 e o container morreria em
+# "exec format error", um erro que não menciona arquitetura nenhuma.
+
+WORKDIR /app
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+RUN go build -o browser ./cmd/browser/main.go
+
+# Etapa 2: Runtime
+FROM debian:bookworm-slim
+
+WORKDIR /app
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Xvfb: tela virtual, já que o servidor não tem interface gráfica.
+# openbox: gerenciador de janelas mínimo, necessário para foco e para os popups
+#          de verificação em duas etapas do Google.
+# x11vnc: servidor RFB, preso em 127.0.0.1 pelo próprio serviço.
+# google-chrome-stable: navegador headful. O login do Google costuma recusar
+#          navegadores headless, então a sessão é criada em modo gráfico real.
+#          O repositório do Google publica amd64 e arm64, e a arquitetura é
+#          resolvida em tempo de build: fixá-la faria o apt ignorar o
+#          repositório inteiro no servidor ARM.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        gnupg \
+        xvfb \
+        x11vnc \
+        openbox \
+        fonts-liberation \
+        fonts-noto-color-emoji \
+        dbus-x11 \
+        tini \
+    && curl -fsSL https://dl.google.com/linux/linux_signing_key.pub \
+        | gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/google-chrome.gpg] https://dl.google.com/linux/chrome/deb/ stable main" \
+        > /etc/apt/sources.list.d/google-chrome.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends google-chrome-stable \
+    && rm -rf /var/lib/apt/lists/*
+
+# O serviço roda sem privilégios: nada aqui precisa de root, e o sandbox do
+# Chrome depende de user namespaces, não de root.
+RUN useradd --create-home --shell /usr/sbin/nologin --uid 10001 browseruser \
+    && mkdir -p /data/profiles /tmp/.X11-unix \
+    && chown -R browseruser:browseruser /data \
+    && chmod 700 /data/profiles \
+    && chmod 1777 /tmp/.X11-unix
+
+COPY --from=builder /app/browser ./main
+RUN chown browseruser:browseruser ./main
+
+ENV BROWSER_PROFILES_DIR=/data/profiles \
+    BROWSER_LISTEN_ADDRESS=0.0.0.0:9223 \
+    BROWSER_BINARY=/usr/bin/google-chrome-stable \
+    BROWSER_SCREEN_SIZE=1440x900 \
+    BROWSER_IDLE_TIMEOUT=15m \
+    BROWSER_MAX_SESSIONS=2
+
+USER browseruser
+
+EXPOSE 9223
+
+VOLUME ["/data/profiles"]
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD curl -fsS http://127.0.0.1:9223/health || exit 1
+
+# tini colhe os processos órfãos do Chrome, que gera muitos filhos.
+ENTRYPOINT ["/usr/bin/tini", "--", "./main"]

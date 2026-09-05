@@ -37,3 +37,9 @@ SET
   updated_at = now()
 WHERE id = $1
 RETURNING *;
+
+-- name: SetUserRoleByEmail :one
+UPDATE users
+SET role = $2, updated_at = now()
+WHERE email = $1
+RETURNING *;

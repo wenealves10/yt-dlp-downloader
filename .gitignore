@@ -37,3 +37,7 @@ go.work.sum
 docker-stack
 *cookies.txt
 test.sh
+
+# Configuração da produção: senhas, tokens e credenciais em um arquivo só.
+# O `.env` acima NÃO pega este nome, porque ele não começa com ponto.
+docker/builder/stack.env

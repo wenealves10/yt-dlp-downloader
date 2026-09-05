@@ -9,26 +9,28 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
-	"github.com/wenealves10/yt-dlp-downloader/internal/configs"
 	"github.com/wenealves10/yt-dlp-downloader/internal/db"
 	"github.com/wenealves10/yt-dlp-downloader/internal/helpers"
 	"github.com/wenealves10/yt-dlp-downloader/internal/libs/stream"
 	"github.com/wenealves10/yt-dlp-downloader/internal/queues"
 	"github.com/wenealves10/yt-dlp-downloader/internal/tasks"
 	"github.com/wenealves10/yt-dlp-downloader/internal/utils"
+	"github.com/wenealves10/yt-dlp-downloader/internal/ytaccounts"
 )
 
 type JobDownloadVideo struct {
 	client   *asynq.Client
 	store    db.Store
 	rdStream stream.EventPublisher
+	accounts ytaccounts.Provider
 }
 
-func NewJobDownloadVideo(client *asynq.Client, store db.Store, rdStream stream.EventPublisher) *JobDownloadVideo {
+func NewJobDownloadVideo(client *asynq.Client, store db.Store, rdStream stream.EventPublisher, accounts ytaccounts.Provider) *JobDownloadVideo {
 	return &JobDownloadVideo{
 		client:   client,
 		store:    store,
 		rdStream: rdStream,
+		accounts: accounts,
 	}
 }
 
@@ -93,7 +95,7 @@ func (p *JobDownloadVideo) ProcessTask(ctx context.Context, task *asynq.Task) er
 	return nil
 }
 
-func (*JobDownloadVideo) downloadVideo(ctx context.Context, filename string, outputPath string, urlVideo string) (string, error) {
+func (p *JobDownloadVideo) downloadVideo(ctx context.Context, filename string, outputPath string, urlVideo string) (string, error) {
 	if err := utils.CreateFolder(outputPath); err != nil {
 		return "", fmt.Errorf("failed to create output directory: %v", err)
 	}
@@ -107,32 +109,25 @@ func (*JobDownloadVideo) downloadVideo(ctx context.Context, filename string, out
 		}
 	}
 
-	var cmd *exec.Cmd
-	if configs.LoadedConfig.ProxyEnabled {
-		proxyUrl := configs.LoadedConfig.ProxyURL
-		cmd = exec.CommandContext(ctx, "yt-dlp",
-			"--proxy", proxyUrl,
-			"-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4",
-			"--merge-output-format", "mp4",
-			"-o", outputFilePath,
-			urlVideo,
-		)
-	} else {
-		cmd = exec.CommandContext(ctx,
-			"yt-dlp",
-			"--cookies", configs.LoadedConfig.YoutubeDLFileCookies,
-			"--user-agent", configs.LoadedConfig.YoutubeDLUserAgent,
-			"--referer", configs.LoadedConfig.YoutubeDLReferer,
-			"--add-header", "DNT: 1",
-			"-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4",
-			"--merge-output-format", "mp4",
-			"-o", outputFilePath,
-			urlVideo,
-		)
-	}
+	// A sessão gerenciada é emprestada só durante o download e o arquivo de
+	// cookies é destruído no Release.
+	lease := ytaccounts.Acquire(ctx, p.accounts)
+	defer lease.Release()
+
+	args := append(ytaccounts.AuthArgs(lease),
+		"-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4",
+		"--merge-output-format", "mp4",
+		"-o", outputFilePath,
+		urlVideo,
+	)
+	cmd := exec.CommandContext(ctx, "yt-dlp", args...)
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
+		// Se o YouTube recusou a sessão, a conta sai do rodízio agora. O asynq
+		// reenfileira a tarefa e a próxima tentativa já escolhe outra conta
+		// autenticada, sem intervenção do administrador.
+		ytaccounts.ReportAuthFailure(ctx, p.accounts, lease, output)
 		return "", fmt.Errorf("failed to execute command: %v, output: %s", err, output)
 	}
 

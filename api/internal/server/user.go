@@ -31,6 +31,7 @@ type userResponse struct {
 	PasswordChangedAt *time.Time `json:"password_changed_at"`
 	PhotoUrl          string     `json:"photo_url,omitempty"`
 	Plan              string     `json:"plan"`
+	Role              string     `json:"role"`
 	DailyLimit        int32      `json:"daily_limit"`
 	IsVerified        bool       `json:"is_verified"`
 	CreatedAt         *time.Time `json:"created_at"`
@@ -41,6 +42,7 @@ func newUserResponse(user db.User) userResponse {
 		ID:                user.ID,
 		PhotoUrl:          user.PhotoUrl.String,
 		Plan:              string(user.Plan),
+		Role:              string(user.Role),
 		DailyLimit:        user.DailyLimit,
 		IsVerified:        user.IsVerified,
 		FullName:          user.FullName,
@@ -315,6 +317,7 @@ func convertUserToResponse(user db.User) userResponse {
 		Email:             user.Email,
 		PhotoUrl:          user.PhotoUrl.String,
 		Plan:              string(user.Plan),
+		Role:              string(user.Role),
 		DailyLimit:        user.DailyLimit,
 		IsVerified:        user.IsVerified,
 		PasswordChangedAt: user.PasswordChangedAt,

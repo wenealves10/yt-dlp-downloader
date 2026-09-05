@@ -20,7 +20,7 @@ INSERT INTO users (
 VALUES (
   $1, $2, $3, $4, $5, $6, $7, $8, $9
 )
-RETURNING id, full_name, photo_url, email, hashed_password, password_changed_at, active, plan, daily_limit, last_login, is_verified, created_at, updated_at
+RETURNING id, full_name, photo_url, email, hashed_password, password_changed_at, active, plan, daily_limit, last_login, is_verified, created_at, updated_at, role
 `
 
 type CreateUserParams struct {
@@ -62,12 +62,13 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.IsVerified,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Role,
 	)
 	return i, err
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, full_name, photo_url, email, hashed_password, password_changed_at, active, plan, daily_limit, last_login, is_verified, created_at, updated_at FROM users WHERE email = $1 LIMIT 1
+SELECT id, full_name, photo_url, email, hashed_password, password_changed_at, active, plan, daily_limit, last_login, is_verified, created_at, updated_at, role FROM users WHERE email = $1 LIMIT 1
 `
 
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
@@ -87,12 +88,13 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.IsVerified,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Role,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, full_name, photo_url, email, hashed_password, password_changed_at, active, plan, daily_limit, last_login, is_verified, created_at, updated_at FROM users WHERE id = $1 LIMIT 1
+SELECT id, full_name, photo_url, email, hashed_password, password_changed_at, active, plan, daily_limit, last_login, is_verified, created_at, updated_at, role FROM users WHERE id = $1 LIMIT 1
 `
 
 func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
@@ -112,12 +114,13 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.IsVerified,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Role,
 	)
 	return i, err
 }
 
 const getUsers = `-- name: GetUsers :many
-SELECT id, full_name, photo_url, email, hashed_password, password_changed_at, active, plan, daily_limit, last_login, is_verified, created_at, updated_at FROM users
+SELECT id, full_name, photo_url, email, hashed_password, password_changed_at, active, plan, daily_limit, last_login, is_verified, created_at, updated_at, role FROM users
 ORDER BY created_at DESC
 `
 
@@ -144,6 +147,7 @@ func (q *Queries) GetUsers(ctx context.Context) ([]User, error) {
 			&i.IsVerified,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Role,
 		); err != nil {
 			return nil, err
 		}
@@ -153,6 +157,40 @@ func (q *Queries) GetUsers(ctx context.Context) ([]User, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const setUserRoleByEmail = `-- name: SetUserRoleByEmail :one
+UPDATE users
+SET role = $2, updated_at = now()
+WHERE email = $1
+RETURNING id, full_name, photo_url, email, hashed_password, password_changed_at, active, plan, daily_limit, last_login, is_verified, created_at, updated_at, role
+`
+
+type SetUserRoleByEmailParams struct {
+	Email string       `json:"email"`
+	Role  CoreUserRole `json:"role"`
+}
+
+func (q *Queries) SetUserRoleByEmail(ctx context.Context, arg SetUserRoleByEmailParams) (User, error) {
+	row := q.db.QueryRow(ctx, setUserRoleByEmail, arg.Email, arg.Role)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.FullName,
+		&i.PhotoUrl,
+		&i.Email,
+		&i.HashedPassword,
+		&i.PasswordChangedAt,
+		&i.Active,
+		&i.Plan,
+		&i.DailyLimit,
+		&i.LastLogin,
+		&i.IsVerified,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Role,
+	)
+	return i, err
 }
 
 const updateUser = `-- name: UpdateUser :exec
@@ -169,7 +207,7 @@ SET
   password_changed_at = COALESCE($10, password_changed_at),
   updated_at = now()
 WHERE id = $1
-RETURNING id, full_name, photo_url, email, hashed_password, password_changed_at, active, plan, daily_limit, last_login, is_verified, created_at, updated_at
+RETURNING id, full_name, photo_url, email, hashed_password, password_changed_at, active, plan, daily_limit, last_login, is_verified, created_at, updated_at, role
 `
 
 type UpdateUserParams struct {

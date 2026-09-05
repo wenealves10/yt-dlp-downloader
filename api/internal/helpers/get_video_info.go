@@ -3,10 +3,11 @@ package helpers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os/exec"
 	"sort"
 
-	"github.com/wenealves10/yt-dlp-downloader/internal/configs"
+	"github.com/wenealves10/yt-dlp-downloader/internal/ytaccounts"
 )
 
 type Format struct {
@@ -28,29 +29,59 @@ type VideoInfo struct {
 	Formats       []Format `json:"formats"`
 }
 
-func GetVideoInfo(ctx context.Context, url string) (*VideoInfo, error) {
-	var cmd *exec.Cmd
-	if configs.LoadedConfig.ProxyEnabled {
-		proxyUrl := configs.LoadedConfig.ProxyURL
-		cmd = exec.CommandContext(ctx, "yt-dlp", "--proxy", proxyUrl, "--dump-json", url)
-	} else {
-		cmd = exec.CommandContext(ctx,
-			"yt-dlp",
-			"--cookies", configs.LoadedConfig.YoutubeDLFileCookies,
-			"--user-agent", configs.LoadedConfig.YoutubeDLUserAgent,
-			"--referer", configs.LoadedConfig.YoutubeDLReferer,
-			"--add-header", "DNT: 1",
-			"--dump-json", url)
+// maxInfoAttempts permite trocar de conta uma vez quando a primeira sessão é
+// recusada pelo YouTube. Mais que isso apenas atrasaria a resposta ao usuário.
+const maxInfoAttempts = 2
+
+// GetVideoInfo consulta os metadados do vídeo. Quando existe uma conta
+// gerenciada autenticada, a consulta usa a sessão dela; caso contrário segue
+// com a configuração estática de cookies.
+//
+// Se o YouTube recusar a sessão, a conta é retirada do rodízio e a consulta é
+// repetida com a próxima conta disponível.
+func GetVideoInfo(ctx context.Context, provider ytaccounts.Provider, url string) (*VideoInfo, error) {
+	var lastErr error
+
+	for attempt := 0; attempt < maxInfoAttempts; attempt++ {
+		info, stderr, err := dumpVideoJSON(ctx, provider, url)
+		if err == nil {
+			return info, nil
+		}
+		lastErr = err
+
+		// Só vale tentar de novo se a falha foi de autenticação: qualquer
+		// outro erro se repetiria com outra conta.
+		if !ytaccounts.IsAuthFailure(stderr) {
+			break
+		}
 	}
+
+	return nil, lastErr
+}
+
+// dumpVideoJSON executa uma tentativa e devolve também o stderr do yt-dlp, que
+// é onde a recusa de sessão aparece.
+func dumpVideoJSON(ctx context.Context, provider ytaccounts.Provider, url string) (*VideoInfo, []byte, error) {
+	lease := ytaccounts.Acquire(ctx, provider)
+	defer lease.Release()
+
+	args := append(ytaccounts.AuthArgs(lease), "--dump-json", url)
+	cmd := exec.CommandContext(ctx, "yt-dlp", args...)
 
 	output, err := cmd.Output()
 	if err != nil {
-		return nil, err
+		var stderr []byte
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			stderr = exitErr.Stderr
+		}
+		ytaccounts.ReportAuthFailure(ctx, provider, lease, stderr)
+		return nil, stderr, err
 	}
 
 	var info VideoInfo
 	if err := json.Unmarshal(output, &info); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	var formatsWithSize []Format
@@ -72,5 +103,5 @@ func GetVideoInfo(ctx context.Context, url string) (*VideoInfo, error) {
 
 	info.FileSizeBytes = sizeBytes
 
-	return &info, nil
+	return &info, nil, nil
 }

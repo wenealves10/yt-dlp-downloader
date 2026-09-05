@@ -11,21 +11,44 @@ import (
 )
 
 type Querier interface {
+	// Reivindica a conta autenticada usada há mais tempo e já registra o uso na
+	// mesma operação, de modo que o rodízio não dependa de um UPDATE posterior.
+	//
+	// FOR UPDATE SKIP LOCKED faz dois workers simultâneos pegarem contas
+	// diferentes em vez de disputarem a mesma linha. O parâmetro exclude carrega
+	// as contas já descartadas nesta tentativa, o que permite passar para a
+	// próxima quando uma sessão se revela inválida.
+	//
+	// Não é rotação para contornar limites do YouTube: é distribuição justa entre
+	// as contas legítimas do próprio administrador, respeitando a prioridade.
+	ClaimYoutubeAccount(ctx context.Context, exclude []uuid.UUID) (YoutubeAccount, error)
+	CountAuthenticatedYoutubeAccounts(ctx context.Context) (int64, error)
 	CountDownloadsByUser(ctx context.Context, userID uuid.UUID) (int64, error)
 	CountDownloadsToday(ctx context.Context, userID uuid.UUID) (int64, error)
+	CountYoutubeAccounts(ctx context.Context) (int64, error)
 	CreateDownload(ctx context.Context, arg CreateDownloadParams) (Download, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
+	CreateYoutubeAccount(ctx context.Context, arg CreateYoutubeAccountParams) (YoutubeAccount, error)
 	DeleteDownload(ctx context.Context, id uuid.UUID) error
+	DeleteYoutubeAccount(ctx context.Context, id uuid.UUID) error
 	GetDownloadByID(ctx context.Context, id uuid.UUID) (Download, error)
 	GetDownloadsByUser(ctx context.Context, arg GetDownloadsByUserParams) ([]Download, error)
 	GetDownloadsExpired(ctx context.Context) ([]Download, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
 	GetUsers(ctx context.Context) ([]User, error)
+	GetYoutubeAccountByID(ctx context.Context, id uuid.UUID) (YoutubeAccount, error)
+	GetYoutubeAccounts(ctx context.Context) ([]YoutubeAccount, error)
+	GetYoutubeAccountsForHealthCheck(ctx context.Context) ([]YoutubeAccount, error)
+	SetUserRoleByEmail(ctx context.Context, arg SetUserRoleByEmailParams) (User, error)
 	UpdateDownload(ctx context.Context, arg UpdateDownloadParams) error
 	UpdateDownloadStatus(ctx context.Context, arg UpdateDownloadStatusParams) error
 	UpdateUser(ctx context.Context, arg UpdateUserParams) error
 	UpdateUserLoginInfo(ctx context.Context, id uuid.UUID) error
+	UpdateYoutubeAccount(ctx context.Context, arg UpdateYoutubeAccountParams) (YoutubeAccount, error)
+	// O cast explícito é necessário: sem ele o Postgres deduz tipos diferentes para
+	// o mesmo parâmetro, usado como valor da coluna e dentro do CASE.
+	UpdateYoutubeAccountStatus(ctx context.Context, arg UpdateYoutubeAccountStatusParams) (YoutubeAccount, error)
 }
 
 var _ Querier = (*Queries)(nil)

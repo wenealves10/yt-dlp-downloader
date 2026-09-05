@@ -149,6 +149,95 @@ func (ns NullCorePlanType) Value() (driver.Value, error) {
 	return string(ns.CorePlanType), nil
 }
 
+type CoreUserRole string
+
+const (
+	CoreUserRoleUser       CoreUserRole = "user"
+	CoreUserRoleAdmin      CoreUserRole = "admin"
+	CoreUserRoleSuperAdmin CoreUserRole = "super_admin"
+)
+
+func (e *CoreUserRole) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = CoreUserRole(s)
+	case string:
+		*e = CoreUserRole(s)
+	default:
+		return fmt.Errorf("unsupported scan type for CoreUserRole: %T", src)
+	}
+	return nil
+}
+
+type NullCoreUserRole struct {
+	CoreUserRole CoreUserRole `json:"core_user_role"`
+	Valid        bool         `json:"valid"` // Valid is true if CoreUserRole is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullCoreUserRole) Scan(value interface{}) error {
+	if value == nil {
+		ns.CoreUserRole, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.CoreUserRole.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullCoreUserRole) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.CoreUserRole), nil
+}
+
+type CoreYoutubeAccountStatus string
+
+const (
+	CoreYoutubeAccountStatusNOTCONFIGURED CoreYoutubeAccountStatus = "NOT_CONFIGURED"
+	CoreYoutubeAccountStatusAWAITINGLOGIN CoreYoutubeAccountStatus = "AWAITING_LOGIN"
+	CoreYoutubeAccountStatusAUTHENTICATED CoreYoutubeAccountStatus = "AUTHENTICATED"
+	CoreYoutubeAccountStatusREQUIRESAUTH  CoreYoutubeAccountStatus = "REQUIRES_AUTH"
+	CoreYoutubeAccountStatusDISABLED      CoreYoutubeAccountStatus = "DISABLED"
+	CoreYoutubeAccountStatusERROR         CoreYoutubeAccountStatus = "ERROR"
+)
+
+func (e *CoreYoutubeAccountStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = CoreYoutubeAccountStatus(s)
+	case string:
+		*e = CoreYoutubeAccountStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for CoreYoutubeAccountStatus: %T", src)
+	}
+	return nil
+}
+
+type NullCoreYoutubeAccountStatus struct {
+	CoreYoutubeAccountStatus CoreYoutubeAccountStatus `json:"core_youtube_account_status"`
+	Valid                    bool                     `json:"valid"` // Valid is true if CoreYoutubeAccountStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullCoreYoutubeAccountStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.CoreYoutubeAccountStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.CoreYoutubeAccountStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullCoreYoutubeAccountStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.CoreYoutubeAccountStatus), nil
+}
+
 type Download struct {
 	ID              uuid.UUID          `json:"id"`
 	UserID          uuid.UUID          `json:"user_id"`
@@ -179,4 +268,23 @@ type User struct {
 	IsVerified        bool               `json:"is_verified"`
 	CreatedAt         *time.Time         `json:"created_at"`
 	UpdatedAt         *time.Time         `json:"updated_at"`
+	Role              CoreUserRole       `json:"role"`
+}
+
+type YoutubeAccount struct {
+	ID                  uuid.UUID                `json:"id"`
+	Label               string                   `json:"label"`
+	Email               pgtype.Text              `json:"email"`
+	Status              CoreYoutubeAccountStatus `json:"status"`
+	ProfileDir          string                   `json:"profile_dir"`
+	Active              bool                     `json:"active"`
+	Priority            int32                    `json:"priority"`
+	LastCheckedAt       pgtype.Timestamptz       `json:"last_checked_at"`
+	LastAuthenticatedAt pgtype.Timestamptz       `json:"last_authenticated_at"`
+	LastUsedAt          pgtype.Timestamptz       `json:"last_used_at"`
+	LastError           pgtype.Text              `json:"last_error"`
+	CreatedBy           pgtype.UUID              `json:"created_by"`
+	CreatedAt           *time.Time               `json:"created_at"`
+	UpdatedAt           *time.Time               `json:"updated_at"`
+	DeletedAt           pgtype.Timestamptz       `json:"deleted_at"`
 }

@@ -1,0 +1,15 @@
+# As migrations com o binário do golang-migrate dentro, para o serviço de
+# migrations da stack.
+#
+# Imagem em vez de bind mount de propósito: a versão das migrations passa a ser
+# a mesma coisa que a versão do código, já que as duas saem do mesmo build. Com
+# bind mount, um checkout desatualizado no servidor aplicaria um schema que não
+# é o do binário que está subindo, e isso só apareceria na primeira query que
+# faltasse coluna.
+#
+# A imagem base é multi-arquitetura, então serve tanto no PC quanto no servidor.
+#
+# Contexto de build: o diretório api/.
+FROM migrate/migrate:v4.18.3
+
+COPY sql/migrations /migrations

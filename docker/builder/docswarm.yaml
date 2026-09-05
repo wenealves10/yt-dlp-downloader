@@ -1,0 +1,420 @@
+version: "3.7"
+
+# Stack de produção do AdVideo para Docker Swarm via Portainer.
+# Importe docker/builder/stack.env no Portainer ao criar/atualizar a stack.
+# Não exponha PostgreSQL, Redis nem o navegador remoto: eles ficam somente na
+# rede interna.
+#
+# TRÊS COISAS QUE FAZEM ISTO FUNCIONAR, e que somem se alguém "arrumar" o arquivo:
+#
+#   1. Os labels do Traefik ficam sob `deploy.labels`, NUNCA sob `labels:`. Em
+#      Swarm, `labels:` marca o container e o Traefik não olha para ele — o
+#      roteador simplesmente não nasce, sem erro em lugar nenhum.
+#   2. `DEPLOY_REVISION` em todo serviço de imagem construída aqui. As imagens
+#      são :latest e locais; sem mudar essa variável, "Update the stack" conclui
+#      que nada mudou e mantém o código velho no ar depois de um rebuild.
+#   3. Nada de `env_file:`. `docker stack deploy` não faz a substituição
+#      esperada; o .env entra pela tela "Environment variables" do Portainer.
+#
+# Este é o ÚNICO manifesto de produção para o servidor ARM. `compose.dev.yaml`,
+# na raiz, é de desenvolvimento: publica portas, usa senhas de brinquedo e monta
+# o código do host.
+
+# ---------------------------------------------------------------------------
+# Blocos compartilhados entre API e worker. Existem para não haver dois lugares
+# para editar: um bucket divergente entre os dois manda o arquivo para um lugar
+# e o procura em outro, e isso só aparece quando o cliente clica em "baixar".
+# ---------------------------------------------------------------------------
+x-r2: &r2
+  ACCOUNT_ID: "${ACCOUNT_ID}"
+  ACCESS_KEY_ID: "${ACCESS_KEY_ID}"
+  SECRET_ACCESS_KEY: "${SECRET_ACCESS_KEY}"
+  REGION: "${REGION}"
+  BUCKET_NAME: "${BUCKET_NAME}"
+  ENDPOINT_URL: "${ENDPOINT_URL}"
+
+x-redis: &redis
+  REDIS_HOST: "redis-advideo"
+  REDIS_PORT: "6379"
+  REDIS_USERNAME: ""
+  REDIS_PASSWORD: "${REDIS_PASSWORD}"
+
+x-banco: &banco
+  DB_DRIVER: "postgres"
+  # EXTERNAL_DB_SOURCE tem precedência: preenchido, o serviço postgres abaixo
+  # deixa de ser necessário e pode ser removido.
+  DB_SOURCE: "${EXTERNAL_DB_SOURCE:-postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres-advideo:5432/${POSTGRES_DB}?sslmode=disable}"
+
+# O downloader e o navegador remoto saem pelo mesmo caminho de rede: a sessão é
+# criada e usada pelo mesmo IP.
+x-downloader: &downloader
+  PROXY_ENABLED: "${PROXY_ENABLED}"
+  PROXY_URL: "${PROXY_URL}"
+  YOUTUBE_DL_FILE_COOKIES: "${YOUTUBE_DL_FILE_COOKIES}"
+  YOUTUBE_DL_USER_AGENT: "${YOUTUBE_DL_USER_AGENT}"
+  YOUTUBE_DL_REFERER: "${YOUTUBE_DL_REFERER}"
+
+# O token é o MESMO nos três serviços: é o segredo que autentica API e worker
+# contra o navegador remoto.
+x-navegador: &navegador
+  BROWSER_SERVICE_URL: "http://browser-advideo:9223"
+  BROWSER_SERVICE_TOKEN: "${BROWSER_SERVICE_TOKEN}"
+  BROWSER_SERVICE_TIMEOUT: "3m"
+
+services:
+
+  # =========================================================================
+  # Migrations: sobe, aplica e MORRE. O estado final correto no Portainer é
+  # `complete`, não `running`.
+  #
+  # A espera pelo Postgres é a restart_policy: o Swarm não aguarda healthcheck
+  # de outro serviço, então este falha, espera 10s e tenta de novo, até 30
+  # vezes. `condition: on-failure` não repete quem saiu com zero — é isso que
+  # faz ele aguardar o banco sem reaplicar depois do sucesso.
+  # =========================================================================
+  migrations-advideo:
+    image: advideo-migrate:latest
+    command:
+      - "-path"
+      - "/migrations"
+      - "-database"
+      - "${EXTERNAL_DB_SOURCE:-postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres-advideo:5432/${POSTGRES_DB}?sslmode=disable}"
+      - "up"
+    networks:
+      - advideo-internal
+    environment:
+      DEPLOY_REVISION: "${DEPLOY_REVISION}"
+    deploy:
+      mode: replicated
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 30
+        window: 120s
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+  # =========================================================================
+  # API: rotas do produto, SSE e o painel de contas do YouTube.
+  # =========================================================================
+  api-advideo:
+    image: advideo-api:latest
+    networks:
+      - traefik-public
+      - advideo-internal
+    environment:
+      <<: [*r2, *redis, *banco, *downloader, *navegador]
+      DEPLOY_REVISION: "${DEPLOY_REVISION}"
+      ENV: "production"
+      GIN_MODE: "release"
+      SERVER_ADDRESS: "0.0.0.0:8080"
+      TOKEN_PASETO_KEY: "${TOKEN_PASETO_KEY}"
+      ACCESS_TOKEN_DURATION: "${ACCESS_TOKEN_DURATION}"
+      TURNSTILE_SECRET: "${TURNSTILE_SECRET}"
+      LIMIT_DOWNLOAD_FREE: "${LIMIT_DOWNLOAD_FREE}"
+      LIMIT_DOWNLOAD_PREMIUM: "${LIMIT_DOWNLOAD_PREMIUM}"
+      # Promove o super admin no start. Deixe vazio depois do primeiro deploy.
+      SUPER_ADMIN_EMAIL: "${SUPER_ADMIN_EMAIL}"
+      TZ: "America/Sao_Paulo"
+    # Sem healthcheck o Swarm marca a réplica como pronta no instante em que o
+    # processo nasce — antes do pool do Postgres —, e o Traefik manda tráfego
+    # para quem ainda não atende.
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/healthz || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    deploy:
+      mode: replicated
+      # Uma réplica só: o navegador remoto tem estado local ao container do
+      # serviço de navegador, e o WebSocket do VNC precisa chegar à réplica que
+      # abriu a sessão. Com duas, metade das conexões cairia na errada.
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      update_config:
+        # A nova réplica sobe, fica saudável, e só então a velha sai.
+        order: start-first
+        failure_action: rollback
+        delay: 10s
+      rollback_config:
+        order: start-first
+      restart_policy:
+        condition: any
+        delay: 10s
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 768M
+        reservations:
+          cpus: "0.25"
+          memory: 192M
+      labels:
+        - traefik.enable=true
+        - traefik.http.routers.advideo-api.rule=Host(`${API_DOMAIN}`)
+        - traefik.http.routers.advideo-api.entrypoints=websecure
+        - traefik.http.routers.advideo-api.tls.certresolver=letsencrypt
+        - traefik.http.routers.advideo-api.service=advideo-api
+        - traefik.http.services.advideo-api.loadbalancer.server.port=8080
+        - traefik.http.services.advideo-api.loadbalancer.passHostHeader=true
+
+  # =========================================================================
+  # Worker: baixa, converte e sobe para o R2. Roda o agendador dos periódicos,
+  # incluindo o health check das sessões do YouTube — por isso UMA réplica só:
+  # duas publicariam cada varredura duas vezes.
+  # =========================================================================
+  worker-advideo:
+    image: advideo-worker:latest
+    networks:
+      - advideo-internal
+    volumes:
+      # Rascunho por download. Volume, e não a camada de escrita do container:
+      # um vídeo longo enche a camada e o Docker não avisa.
+      - advideo_worker_uploads:/app/uploads
+    environment:
+      <<: [*r2, *redis, *banco, *downloader, *navegador]
+      DEPLOY_REVISION: "${DEPLOY_REVISION}"
+      ENV: "production"
+      TZ: "America/Sao_Paulo"
+    # O worker não sobe servidor HTTP: não há o que sondar. O que diz que ele
+    # está vivo é a fila andando no Redis.
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      update_config:
+        # stop-first: o worker velho solta as filas ANTES de o novo pegar. Dois
+        # processos de ffmpeg ao mesmo tempo nesta máquina não corrompem nada,
+        # só deixam tudo lento na hora errada.
+        order: stop-first
+        failure_action: rollback
+        delay: 10s
+      restart_policy:
+        condition: any
+        delay: 15s
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2048M
+        reservations:
+          cpus: "0.5"
+          memory: 512M
+
+  # =========================================================================
+  # Navegador remoto: o ÚNICO container que executa um navegador.
+  #
+  # Sem porta publicada e sem label do Traefik: só a API e o worker o alcançam,
+  # pela rede interna, com o token compartilhado. A tela chega ao administrador
+  # por um WebSocket que a API repassa, depois de conferir o super admin.
+  # =========================================================================
+  browser-advideo:
+    image: advideo-browser:latest
+    networks:
+      - advideo-internal
+    volumes:
+      # É AQUI que as sessões do YouTube vivem. `docker stack rm` não apaga
+      # volume, mas "Delete this stack" com a caixa de volumes marcada apaga —
+      # e aí todas as contas precisam de login de novo.
+      - advideo_browser_profiles:/data/profiles
+    environment:
+      <<: [*downloader]
+      DEPLOY_REVISION: "${DEPLOY_REVISION}"
+      ENV: "production"
+      BROWSER_SERVICE_TOKEN: "${BROWSER_SERVICE_TOKEN}"
+      BROWSER_LISTEN_ADDRESS: "0.0.0.0:9223"
+      BROWSER_PROFILES_DIR: "/data/profiles"
+      BROWSER_BINARY: "/usr/bin/google-chrome-stable"
+      BROWSER_SCREEN_SIZE: "${BROWSER_SCREEN_SIZE}"
+      BROWSER_IDLE_TIMEOUT: "${BROWSER_IDLE_TIMEOUT}"
+      BROWSER_MAX_SESSIONS: "${BROWSER_MAX_SESSIONS}"
+      # O Swarm ignora `security_opt`, então não há como entregar o perfil
+      # seccomp que o sandbox do Chrome precisa. Manter o sandbox exigiria
+      # CAP_SYS_ADMIN, que é bem pior para o host do que desligá-lo dentro de um
+      # container de propósito único, sem root e sem porta publicada.
+      BROWSER_DISABLE_SANDBOX: "${BROWSER_DISABLE_SANDBOX}"
+      TZ: "America/Sao_Paulo"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9223/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    deploy:
+      mode: replicated
+      # Réplica única: o estado das sessões é local ao container e o volume de
+      # perfis é local ao nó.
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      update_config:
+        # stop-first: duas instâncias sobre o mesmo volume de perfis brigariam
+        # pelo SingletonLock do Chrome.
+        order: stop-first
+        failure_action: rollback
+        delay: 10s
+      restart_policy:
+        condition: any
+        delay: 15s
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 2048M
+        reservations:
+          memory: 512M
+
+  # =========================================================================
+  # Front: bundle estático servido por nginx. Os domínios já estão DENTRO do
+  # JavaScript — trocar APP_DOMAIN ou API_DOMAIN exige rebuildar esta imagem.
+  # =========================================================================
+  app-advideo:
+    image: advideo-app:latest
+    networks:
+      - traefik-public
+    environment:
+      DEPLOY_REVISION: "${DEPLOY_REVISION}"
+      TZ: "America/Sao_Paulo"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      update_config:
+        order: start-first
+        failure_action: rollback
+        delay: 10s
+      rollback_config:
+        order: start-first
+      restart_policy:
+        condition: any
+        delay: 10s
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+        reservations:
+          memory: 64M
+      labels:
+        - traefik.enable=true
+        - traefik.http.routers.advideo-app.rule=Host(`${APP_DOMAIN}`)
+        - traefik.http.routers.advideo-app.entrypoints=websecure
+        - traefik.http.routers.advideo-app.tls.certresolver=letsencrypt
+        - traefik.http.routers.advideo-app.service=advideo-app
+        - traefik.http.services.advideo-app.loadbalancer.server.port=80
+
+  # =========================================================================
+  # Postgres: fonte da verdade. Remova este serviço se EXTERNAL_DB_SOURCE
+  # apontar para um banco gerenciado.
+  # =========================================================================
+  postgres-advideo:
+    image: postgres:16-alpine
+    networks:
+      - advideo-internal
+    volumes:
+      - advideo_postgres_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
+      POSTGRES_DB: "${POSTGRES_DB}"
+      TZ: "America/Sao_Paulo"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        # O volume é local. Sem esta trava, um segundo nó no futuro subiria o
+        # Postgres em cima de um disco vazio e o produto amanheceria sem dados.
+        constraints:
+          - node.role == manager
+      update_config:
+        order: stop-first
+      restart_policy:
+        condition: any
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1024M
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+
+  # =========================================================================
+  # Redis: entrega de jobs (asynq) e os streams do SSE. NÃO é cache — fila com
+  # política de despejo perde download em silêncio, por isso `noeviction` junto
+  # do AOF.
+  # =========================================================================
+  redis-advideo:
+    image: redis:7-alpine
+    command:
+      - "redis-server"
+      - "--appendonly"
+      - "yes"
+      - "--maxmemory-policy"
+      - "noeviction"
+      - "--requirepass"
+      - "${REDIS_PASSWORD}"
+    networks:
+      - advideo-internal
+    volumes:
+      - advideo_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: any
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+        reservations:
+          memory: 128M
+
+networks:
+  # Criada FORA da stack, pelo Traefik.
+  traefik-public:
+    external: true
+  # Postgres, Redis, worker e navegador vivem só aqui: nenhum publica porta e
+  # nenhum é alcançável pelo Traefik.
+  advideo-internal:
+    driver: overlay
+    attachable: true
+
+volumes:
+  # Os três primeiros são o produto.
+  advideo_postgres_data:
+  advideo_redis_data:
+  # As sessões autenticadas do YouTube. É o que sobrevive a restart, redeploy e
+  # recriação do container.
+  advideo_browser_profiles:
+  # Descartável: só rascunho dos downloads em andamento.
+  advideo_worker_uploads:

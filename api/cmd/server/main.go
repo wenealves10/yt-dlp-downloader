@@ -13,11 +13,13 @@ import (
 	"github.com/hibiken/asynq"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
+	"github.com/wenealves10/yt-dlp-downloader/internal/browser"
 	"github.com/wenealves10/yt-dlp-downloader/internal/configs"
 	"github.com/wenealves10/yt-dlp-downloader/internal/db"
 	"github.com/wenealves10/yt-dlp-downloader/internal/libs/storage/r2"
 	"github.com/wenealves10/yt-dlp-downloader/internal/libs/stream"
 	"github.com/wenealves10/yt-dlp-downloader/internal/server"
+	"github.com/wenealves10/yt-dlp-downloader/internal/ytaccounts"
 	"github.com/wenealves10/yt-dlp-downloader/pkg/sse"
 )
 
@@ -90,7 +92,15 @@ func main() {
 		}
 	}()
 
-	api, err := server.NewServer(cg, store, asynqClient, sseManager, r2Storage)
+	// Integração com o serviço de navegador remoto. Quando não configurada, o
+	// cliente é nil e a aplicação segue funcionando sem contas gerenciadas.
+	browserClient := browser.NewClient(cg.BrowserServiceURL, cg.BrowserServiceToken, cg.BrowserServiceTimeout)
+	if browserClient.Configured() {
+		log.Println("🖥️  serviço de navegador remoto configurado")
+	}
+	accountProvider := ytaccounts.NewManager(store, browserClient)
+
+	api, err := server.NewServer(cg, store, asynqClient, sseManager, r2Storage, rdb, browserClient, accountProvider)
 	if err != nil {
 		log.Fatalf("cannot create server: %v", err)
 	}

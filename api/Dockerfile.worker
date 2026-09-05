@@ -2,8 +2,10 @@
 FROM golang:1.23.2 AS builder
 
 ENV GO111MODULE=on \
-    GOOS=linux \
-    GOARCH=amd64
+    GOOS=linux
+# GOARCH não é fixado: a imagem é construída no próprio servidor, e o servidor é
+# ARM. Com GOARCH=amd64 o binário sairia x86 e o container morreria em
+# "exec format error", um erro que não menciona arquitetura nenhuma.
 
 WORKDIR /app
 
@@ -28,12 +30,33 @@ RUN apt-get update && apt-get install -y \
     python3-venv \
     ffmpeg \
     curl \
+    unzip \
     ca-certificates \
     && python3 -m venv /opt/venv \
     && /opt/venv/bin/pip install --upgrade pip \
     && /opt/venv/bin/pip install "yt-dlp[default]==${YT_DLP_VERSION}" \
     && /opt/venv/bin/yt-dlp --version \
     && rm -rf /var/lib/apt/lists/*
+
+
+ARG DENO_VERSION=2.9.6
+
+# Runtime JavaScript exigido pelo yt-dlp para resolver o desafio "n" do YouTube.
+# Sem ele, requisições feitas com cookies de uma conta autenticada falham com
+# "The page needs to be reloaded"; sem conta, apenas faltam formatos.
+RUN set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    case "$arch" in \
+      amd64) deno_target=x86_64-unknown-linux-gnu ;; \
+      arm64) deno_target=aarch64-unknown-linux-gnu ;; \
+      *) echo "arquitetura nao suportada para o Deno: $arch" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL -o /tmp/deno.zip \
+      "https://github.com/denoland/deno/releases/download/v${DENO_VERSION}/deno-${deno_target}.zip"; \
+    unzip -q /tmp/deno.zip -d /usr/local/bin; \
+    chmod +x /usr/local/bin/deno; \
+    rm -f /tmp/deno.zip; \
+    deno --version
 
 ENV PATH="/opt/venv/bin:$PATH"
 

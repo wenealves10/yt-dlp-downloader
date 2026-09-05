@@ -92,5 +92,6 @@ func authorizeToken(ctx *gin.Context, tokenCreator tokens.TokenCreator, store db
 	}
 
 	ctx.Set(authorizationPayloadKey, payload)
+	ctx.Set(authorizationUserKey, user)
 	return true
 }

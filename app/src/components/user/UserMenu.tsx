@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from "react";
 import { bucketHost } from "../../constants/config";
 
-import { Settings, LogOut } from "lucide-react";
+import { Settings, LogOut, Youtube } from "lucide-react";
+import { Link } from "react-router-dom";
 import type { User } from "../../interface/User";
 import { useModalConfig } from "../../hooks/useModal";
 
@@ -56,6 +57,16 @@ export const UserMenu: React.FC<UserMenuProps> = ({ user, onLogout }) => {
             <p className="text-sm text-gray-400 truncate">{user?.email}</p>
           </div>
           <div className="py-1">
+            {user?.role === "super_admin" && (
+              <Link
+                to="/admin/youtube/accounts"
+                onClick={() => setIsOpen(false)}
+                className="w-full text-left flex items-center gap-3 px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white"
+              >
+                <Youtube size={16} />
+                YouTube · Contas
+              </Link>
+            )}
             <button
               onClick={() => {
                 toggleModal();

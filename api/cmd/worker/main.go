@@ -13,6 +13,7 @@ import (
 	"github.com/hibiken/asynq"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
+	"github.com/wenealves10/yt-dlp-downloader/internal/browser"
 	"github.com/wenealves10/yt-dlp-downloader/internal/configs"
 	"github.com/wenealves10/yt-dlp-downloader/internal/db"
 	"github.com/wenealves10/yt-dlp-downloader/internal/jobs"
@@ -20,6 +21,7 @@ import (
 	"github.com/wenealves10/yt-dlp-downloader/internal/libs/stream"
 	"github.com/wenealves10/yt-dlp-downloader/internal/queues"
 	"github.com/wenealves10/yt-dlp-downloader/internal/tasks"
+	"github.com/wenealves10/yt-dlp-downloader/internal/ytaccounts"
 )
 
 func main() {
@@ -77,6 +79,9 @@ func main() {
 		Password: cg.RedisPassword,
 	}
 
+	browserClient := browser.NewClient(cg.BrowserServiceURL, cg.BrowserServiceToken, cg.BrowserServiceTimeout)
+	accountProvider := ytaccounts.NewManager(store, browserClient)
+
 	srv := asynq.NewServer(
 		asynqRedisOpt,
 		asynq.Config{
@@ -88,22 +93,24 @@ func main() {
 				queues.TypeUploadMusicQueue:        queues.QueueWeightUploadMusic,
 				queues.TypeDownloadExpirationQueue: queues.QueueWeightFileExpiration,
 				queues.TypeDeleteDownloadQueue:     queues.QueueWeightDeleteDownload,
+				queues.TypeYoutubeHealthCheckQueue: queues.QueueWeightYoutubeHealth,
 			},
 		},
 	)
 
-	go startScheduledTasks(asynqRedisOpt)
+	go startScheduledTasks(asynqRedisOpt, browserClient.Configured())
 
 	asynqClient := asynq.NewClient(asynqRedisOpt)
 	defer asynqClient.Close()
 
 	mux := asynq.NewServeMux()
-	mux.Handle(tasks.TypeDownloadVideo, jobs.NewJobDownloadVideo(asynqClient, store, rdStream))
-	mux.Handle(tasks.TypeDownloadMusic, jobs.NewJobDownloadMusic(asynqClient, store, rdStream))
+	mux.Handle(tasks.TypeDownloadVideo, jobs.NewJobDownloadVideo(asynqClient, store, rdStream, accountProvider))
+	mux.Handle(tasks.TypeDownloadMusic, jobs.NewJobDownloadMusic(asynqClient, store, rdStream, accountProvider))
 	mux.Handle(tasks.TypeUploadVideo, jobs.NewJobUploadVideo(asynqClient, r2Storage, store, rdStream))
 	mux.Handle(tasks.TypeUploadMusic, jobs.NewJobUploadMusic(asynqClient, r2Storage, store, rdStream))
 	mux.Handle(tasks.TypeDeleteDownload, jobs.NewJobDeleteDownload(asynqClient, r2Storage, store))
 	mux.Handle(tasks.TypeDownloadExpiration, jobs.NewJobDownloadExpiration(asynqClient, store))
+	mux.Handle(tasks.TypeYoutubeHealthCheck, jobs.NewJobYoutubeHealthCheck(store, browserClient))
 	log.Printf("Starting worker server on %s with a maximum of %d concurrent tasks", redisAddr, queues.WorkerConcurrency)
 
 	if err := srv.Run(mux); err != nil {
@@ -111,7 +118,7 @@ func main() {
 	}
 }
 
-func startScheduledTasks(redisOpt asynq.RedisClientOpt) {
+func startScheduledTasks(redisOpt asynq.RedisClientOpt, withYoutubeHealthCheck bool) {
 	loc, err := time.LoadLocation("America/Sao_Paulo")
 	if err != nil {
 		panic(err)
@@ -131,6 +138,20 @@ func startScheduledTasks(redisOpt asynq.RedisClientOpt) {
 	entryID, err := scheduler.Register("*/5 * * * *", task, asynq.Queue(queues.TypeDownloadExpirationQueue))
 	if err != nil {
 		log.Fatal(err)
+	}
+
+	// O health check das sessões só é agendado quando o serviço de navegador
+	// existe, para não gerar ruído em ambientes sem contas gerenciadas.
+	if withYoutubeHealthCheck {
+		healthTask, err := tasks.NewYoutubeHealthCheckTask()
+		if err != nil {
+			log.Fatalf("failed to create youtube health check task: %v", err)
+		}
+		healthEntryID, err := scheduler.Register("*/15 * * * *", healthTask, asynq.Queue(queues.TypeYoutubeHealthCheckQueue))
+		if err != nil {
+			log.Fatal(err)
+		}
+		log.Println("🩺 Health check das contas do YouTube agendado...", "Entry ID:", healthEntryID)
 	}
 
 	log.Println("⏱️ Scheduler iniciado...", "Entry ID:", entryID)

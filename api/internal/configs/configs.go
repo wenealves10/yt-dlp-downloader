@@ -56,6 +56,28 @@ type Config struct {
 	YoutubeDLAddHeader   string `mapstructure:"YOUTUBE_DL_ADD_HEADER"`
 	LimitDownloadFree    int64  `mapstructure:"LIMIT_DOWNLOAD_FREE"`
 	LimitDownloadPremium int64  `mapstructure:"LIMIT_DOWNLOAD_PREMIUM"`
+
+	// Serviço de navegador remoto (advideo-browser). A URL só é resolvível na
+	// rede interna e o token é o segredo compartilhado entre API, worker e o
+	// serviço. Nunca deve ser exposto ao frontend.
+	BrowserServiceURL     string        `mapstructure:"BROWSER_SERVICE_URL"`
+	BrowserServiceToken   string        `mapstructure:"BROWSER_SERVICE_TOKEN"`
+	BrowserServiceTimeout time.Duration `mapstructure:"BROWSER_SERVICE_TIMEOUT"`
+
+	// Promove este e-mail a super admin durante o start do servidor. Serve
+	// apenas para o bootstrap do primeiro administrador.
+	SuperAdminEmail string `mapstructure:"SUPER_ADMIN_EMAIL"`
+
+	// Configuração exclusiva do serviço de navegador.
+	BrowserListenAddress string        `mapstructure:"BROWSER_LISTEN_ADDRESS"`
+	BrowserProfilesDir   string        `mapstructure:"BROWSER_PROFILES_DIR"`
+	BrowserBinary        string        `mapstructure:"BROWSER_BINARY"`
+	BrowserIdleTimeout   time.Duration `mapstructure:"BROWSER_IDLE_TIMEOUT"`
+	BrowserScreenSize    string        `mapstructure:"BROWSER_SCREEN_SIZE"`
+	BrowserMaxSessions   int           `mapstructure:"BROWSER_MAX_SESSIONS"`
+	// Escape hatch para kernels/hosts onde o sandbox do Chrome não sobe. O
+	// padrão é manter o sandbox ligado.
+	BrowserDisableSandbox bool `mapstructure:"BROWSER_DISABLE_SANDBOX"`
 }
 
 var LoadedConfig Config

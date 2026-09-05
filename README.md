@@ -9,9 +9,10 @@
 | Tecnologia      | Função                                                    |
 |----------------|-----------------------------------------------------------|
 | **Go (Golang)** | Backend performático e conciso                           |
-| **Fiber**       | Framework HTTP leve e rápido para criação de APIs REST   |
+| **Gin**         | Framework HTTP usado pela API REST                       |
 | **Asynq**       | Gerenciador de tarefas assíncronas via Redis             |
 | **yt-dlp**      | Ferramenta de linha de comando para baixar vídeos        |
+| **Deno**        | Runtime JS que o yt-dlp usa para resolver o desafio `n` do YouTube |
 | **Redis**       | Fila de tarefas e Pub/Sub para comunicação de eventos    |
 | **SSE (Server-Sent Events)** | Comunicação em tempo real do backend para o frontend |
 
@@ -33,15 +34,19 @@
 ```bash
 yt-dlp-downloader/
 ├── cmd/
-│   ├── server/     # Servidor HTTP com Fiber
-│   └── worker/     # Worker Asynq que processa os downloads
+│   ├── server/     # API HTTP com Gin
+│   ├── worker/     # Worker Asynq que processa os downloads
+│   └── browser/    # Serviço de navegador remoto (contas do YouTube)
 ├── internal/
-│   ├── api/        # Handlers e rotas
-│   ├── jobs/       # Definições de tarefas e payloads
-│   ├── services/   # Lógica de negócio (yt-dlp, SSE, etc)
-│   ├── sse/        # Gerenciamento de conexões SSE
-│   └── models/     # Estruturas e modelos de dados
-├── docker-compose.yml  # Redis e serviços auxiliares
+│   ├── server/     # Handlers, rotas e middlewares
+│   ├── jobs/       # Processadores das tarefas assíncronas
+│   ├── tasks/      # Definições de tarefas e payloads
+│   ├── db/         # Código gerado pelo sqlc
+│   ├── browser/    # Cliente do serviço de navegador
+│   ├── browserd/   # Implementação do serviço de navegador
+│   ├── ytaccounts/ # Sessões das contas entregues ao downloader
+│   └── libs/       # Storage (R2) e streams do Redis
+├── compose.dev.yaml    # Ambiente local completo
 ├── go.mod
 └── README.md
 ```
@@ -122,12 +127,189 @@ make dev-down
 
 ---
 
+## 🔐 Contas do YouTube (painel de Super Admin)
+
+O downloader pode usar sessões autenticadas de contas do YouTube controladas
+pelo administrador, em vez de um arquivo de cookies mantido à mão. O login é
+sempre **manual**: o sistema abre um navegador remoto, o Super Admin entra na
+conta e a sessão fica salva no perfil persistente do Chrome. **Nenhuma senha é
+pedida, exibida ou armazenada.**
+
+### Fluxo
+
+```
+Super Admin → YouTube → Contas → Adicionar conta → Abrir navegador
+   → login manual no Google
+   → o painel detecta a sessão sozinho e marca "Autenticada"
+   → fechar navegador → sessão persistida no perfil
+   → downloads passam a usar a sessão
+   → se a sessão expirar, o painel avisa e oferece "Reautenticar"
+```
+
+Enquanto a tela do navegador remoto está aberta, o painel verifica a sessão a
+cada 10 s e para assim que ela é reconhecida. Não é preciso clicar em nada
+depois de fazer o login.
+
+### Componentes
+
+| Serviço | Responsabilidade |
+|---|---|
+| `advideo-backend` | Painel, autorização de Super Admin, proxy do WebSocket do navegador |
+| `advideo-worker`  | Downloads e health check agendado das sessões |
+| `advideo-browser` | **Novo.** Único processo que executa o Chrome, mantém os perfis e exporta os cookies |
+
+`advideo-browser` roda com uma réplica, sem porta publicada e apenas na
+`agent_network`. Ele existe separado porque a API tem duas réplicas (um
+navegador aberto em uma seria invisível para a outra) e porque API e worker estão
+limitados a 512M, insuficiente para um Chrome headful com Xvfb.
+
+Dentro dele: `Xvfb` (tela virtual) + `openbox` (foco e popups do login em duas
+etapas) + `google-chrome` headful + `x11vnc` preso em `127.0.0.1`. O painel
+enxerga a tela por um cliente noVNC que fala com a API; a API repassa o
+WebSocket para o serviço. O Chrome é headful de propósito: o login do Google
+recusa navegadores headless.
+
+### Segurança
+
+- Toda rota administrativa exige `role = super_admin`, verificado no banco.
+- O WebSocket usa um **ticket de uso único** com 60 s de validade, guardado no
+  Redis e amarrado ao par (usuário, conta) — o token de acesso nunca vai para a
+  query string.
+- O `x11vnc` escuta apenas em `127.0.0.1` dentro do container e ainda exige uma
+  senha aleatória por sessão.
+- Os perfis ficam em `/data/profiles/<uuid>` com permissão `0700`. O
+  identificador é validado como UUID, o que fecha path traversal.
+- Cookies nunca chegam ao frontend, ao banco ou aos logs. O worker recebe o jar
+  em um arquivo `0600` temporário, apagado ao fim do download.
+
+### Configuração
+
+Use o mesmo `BROWSER_SERVICE_TOKEN` nos três serviços (`openssl rand -hex 32`).
+Veja `api/.env.example`. Para criar o primeiro administrador, cadastre o usuário
+normalmente e defina `SUPER_ADMIN_EMAIL` na API — ele é promovido no start.
+
+**Sandbox do Chrome:** o sandbox precisa criar user namespaces, que o seccomp
+padrão do Docker bloqueia. Em Compose isso se resolve com
+`api/docker/chrome-seccomp.json` (já configurado em `compose.dev.yaml`), que
+mantém todo o bloqueio padrão e libera apenas `clone`/`unshare`. O Swarm ignora
+`security_opt`, então lá use `BROWSER_DISABLE_SANDBOX=true` — preferível a
+conceder `CAP_SYS_ADMIN`, que seria bem pior para o host.
+
+### Deploy
+
+```bash
+docker stack deploy -c docker-stack/deploy-browser.yml advideo-browser
+```
+
+O volume `advideo_browser_profiles` guarda as sessões e é o que faz elas
+sobreviverem a restart, redeploy e recriação do container.
+
+### Rodízio entre contas e failover
+
+Quando existe mais de uma conta autenticada, os downloads se alternam entre
+elas. A escolha é feita em uma única instrução no banco:
+
+```sql
+UPDATE ... WHERE id = (SELECT ... ORDER BY priority, last_used_at NULLS FIRST
+                       LIMIT 1 FOR UPDATE SKIP LOCKED)
+```
+
+- **Rodízio:** vence a conta usada há mais tempo, então o uso se distribui
+  sozinho. `priority` (menor = preferida) permite manter uma conta principal e
+  outras de reserva; com prioridades iguais o rodízio é circular.
+- **Concorrência:** o `SKIP LOCKED` faz dois workers simultâneos pegarem contas
+  diferentes em vez de disputarem a mesma linha, e o uso é registrado na mesma
+  operação da seleção.
+- **Failover imediato:** se a sessão escolhida não tiver cookies do Google, a
+  conta é marcada como `REQUER AUTENTICAÇÃO` e a próxima é tentada na mesma
+  requisição (até 5 contas).
+- **Failover pelo veredito do YouTube:** se o yt-dlp responder que a sessão foi
+  recusada, a conta sai do rodízio na hora. Na consulta de metadados a troca é
+  imediata; no download o asynq reenfileira a tarefa e a próxima tentativa já
+  escolhe outra conta.
+- **Volta automática:** o health check a cada 15 minutos reavalia as contas em
+  `REQUER AUTENTICAÇÃO` e devolve ao rodízio as que voltarem a funcionar.
+
+Restrições de conteúdo (vídeo privado, exclusivo para membros, bloqueio
+regional) **não** tiram a conta do rodízio: elas não indicam sessão inválida.
+
+Isso é distribuição entre as contas legítimas do administrador e resiliência a
+sessão expirada — não há rotação de IP, proxy ou identidade para contornar
+limites do YouTube.
+
+### Runtime JavaScript (obrigatório)
+
+As imagens que executam o yt-dlp (`Dockerfile.server`, `Dockerfile.worker` e
+`Dockerfile.dev`) instalam o **Deno**. Ele não é opcional quando existe conta
+gerenciada: com cookies de uma conta autenticada e sem runtime JS, o YouTube
+recusa a extração com `ERROR: The page needs to be reloaded`. Sem conta o
+download ainda funciona, mas com menos formatos disponíveis.
+
+### Health check
+
+O worker verifica as sessões a cada 15 minutos: lê os cookies do perfil e, se
+houver cookies de sessão, faz uma única requisição ao YouTube. Sessão inválida
+vira `REQUER AUTENTICAÇÃO` no painel. Uma falha do serviço de navegador vira
+`ERRO`, e não um pedido de login — a sessão salva pode estar intacta.
+
+---
+
+## 🚀 Produção no servidor ARM (Docker Swarm + Portainer)
+
+O servidor é **ARM (aarch64)** e **não há registry**: as imagens são construídas
+no próprio servidor, ficam locais com a tag `:latest`, e a stack é aplicada pelo
+Portainer.
+
+```sh
+cp docker/builder/stack.env.example docker/builder/stack.env
+chmod 600 docker/builder/stack.env
+# preencha o arquivo
+sh docker/builder/build-images.sh
+```
+
+O script valida tudo **antes** do primeiro build e recusa configuração errada:
+chave PASETO com tamanho inválido, senha com caractere que quebra a URL do
+Postgres, site key de teste do Turnstile, proxy ligado sem URL. Descobrir isso
+depois de vinte minutos baixando o Chrome é uma espera que não se paga.
+
+Cinco imagens: `advideo-migrate`, `advideo-api`, `advideo-worker`,
+`advideo-browser` e `advideo-app`. Nenhum Dockerfile fixa `GOARCH`, e tanto o
+repositório do Chrome quanto o download do Deno resolvem a arquitetura em tempo
+de build — as imagens saem corretas para a máquina onde o script roda.
+
+Depois de todo rebuild, **incremente `DEPLOY_REVISION`**. As imagens são
+`:latest` e locais; sem essa mudança o Swarm conclui que nada mudou e mantém o
+código velho no ar, com o build tendo terminado sem um único erro.
+
+O passo a passo completo está em [`docker/builder/README.md`](docker/builder/README.md).
+
+### Duas coisas que costumam morder
+
+**O front carrega os domínios dentro do bundle.** `API_DOMAIN`, `APP_DOMAIN`,
+`BUCKET_HOST` e `TURNSTILE_SITE_KEY` viram texto dentro do JavaScript no build.
+Trocar qualquer um deles exige `sh docker/builder/build-images.sh app` —
+atualizar a stack sozinho não muda um bundle já gerado.
+
+**Em Swarm o sandbox do Chrome fica desligado.** O `security_opt` é ignorado por
+`docker stack deploy`, então não há como entregar o perfil seccomp que libera
+user namespaces. Manter o sandbox exigiria `CAP_SYS_ADMIN`, que é bem pior para
+o host do que desligá-lo dentro de um container de propósito único, sem root e
+sem porta publicada. O `build-images.sh` recusa buildar com
+`BROWSER_DISABLE_SANDBOX` diferente de `true`.
+
+### Deploy antigo (x86, ghcr.io)
+
+`docker-stack/deploy-*.yml` é o caminho anterior, com imagens publicadas no
+GitHub Container Registry pelos workflows em `.github/workflows/`. Os dois não
+devem conviver no mesmo servidor.
+
 ## 📌 Próximas Melhorias
 
 - [ ] Armazenamento persistente no PostgreSQL
 - [ ] Upload automático para armazenamento em nuvem
 - [ ] Dashboard com histórico e progresso em tempo real
-- [ ] Autenticação e controle de acesso
+- [x] Autenticação e controle de acesso
+- [x] Gerenciamento de contas do YouTube pelo Super Admin
 
 ---
 

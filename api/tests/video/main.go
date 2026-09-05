@@ -15,7 +15,7 @@ func main() {
 	}
 	url_video := "https://www.youtube.com/watch?v=HWjoQ92VKEs"
 	ctx := context.Background()
-	videoInfo, err := helpers.GetVideoInfo(ctx, url_video)
+	videoInfo, err := helpers.GetVideoInfo(ctx, nil, url_video)
 	if err != nil {
 		log.Fatalf("Error getting video info: %v", err)
 	}

@@ -3,6 +3,7 @@ package db
 import (
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -39,4 +40,15 @@ func ToCorePlanType(plan *CorePlanType) NullCorePlanType {
 		return NullCorePlanType{CorePlanType: *plan, Valid: true}
 	}
 	return NullCorePlanType{Valid: false}
+}
+
+func ToPgUUID(id uuid.UUID) pgtype.UUID {
+	return pgtype.UUID{Bytes: id, Valid: id != uuid.Nil}
+}
+
+func ToCoreYoutubeAccountStatus(status *CoreYoutubeAccountStatus) NullCoreYoutubeAccountStatus {
+	if status != nil {
+		return NullCoreYoutubeAccountStatus{CoreYoutubeAccountStatus: *status, Valid: true}
+	}
+	return NullCoreYoutubeAccountStatus{Valid: false}
 }

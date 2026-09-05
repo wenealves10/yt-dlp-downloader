@@ -11,4 +11,5 @@ const (
 	TypeCreateTweetMusic   = "create:tweet:music"
 	TypeDownloadExpiration = "download:expiration"
 	TypeDeleteDownload     = "download:delete"
+	TypeYoutubeHealthCheck = "youtube:session:health"
 )

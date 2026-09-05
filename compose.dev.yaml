@@ -93,6 +93,37 @@ services:
       migrate:
         condition: service_completed_successfully
 
+  # Serviço de navegador remoto. Não publica portas: só a API e o worker o
+  # alcançam, pela rede interna do Compose, com o segredo compartilhado.
+  browser:
+    build:
+      context: ./api
+      dockerfile: Dockerfile.browser
+    env_file:
+      - ./api/.env
+    environment:
+      ENV: development
+      BROWSER_LISTEN_ADDRESS: 0.0.0.0:9223
+      BROWSER_PROFILES_DIR: /data/profiles
+      BROWSER_SCREEN_SIZE: 1440x900
+      BROWSER_IDLE_TIMEOUT: 15m
+      BROWSER_MAX_SESSIONS: 2
+    volumes:
+      - dev_browser_profiles:/data/profiles
+    # O sandbox do Chrome precisa criar user namespaces, o que o seccomp padrão
+    # do Docker bloqueia. Este perfil mantém todo o bloqueio padrão e libera
+    # apenas clone/unshare, permitindo manter o sandbox ligado.
+    security_opt:
+      - seccomp=./api/docker/chrome-seccomp.json
+    # O Chrome usa /dev/shm intensamente; o padrão de 64M causa aborts.
+    shm_size: "1gb"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9223/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
   worker:
     build:
       context: ./api
@@ -115,17 +146,27 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+      browser:
+        condition: service_healthy
 
   app:
     build:
       context: ./app
       dockerfile: Dockerfile.dev
     working_dir: /workspace
+    # node_modules vive em um volume nomeado, então o `npm install` feito na
+    # máquina host não chega aqui. Reinstalar quando o lock for mais novo que a
+    # última instalação evita o "Failed to resolve import" de dependência nova.
     command: >-
-      sh -ec 'if [ ! -x node_modules/.bin/vite ]; then npm ci; fi;
+      sh -ec 'if [ ! -x node_modules/.bin/vite ] ||
+      [ package-lock.json -nt node_modules/.package-lock.json ]; then npm ci; fi;
       exec npm run dev -- --host 0.0.0.0'
     environment:
-      VITE_API_URL: https://yt-api.wene.com.br
+      # Aponta para a API local subida por este mesmo Compose. Para desenvolver
+      # o front contra outra API (a de produção, por exemplo), exporte
+      # DEV_API_URL antes do `make dev`. Se você mudar DEV_API_PORT, ajuste
+      # DEV_API_URL junto.
+      VITE_API_URL: ${DEV_API_URL:-http://localhost:8081}
       VITE_SITE_KEY: 1x00000000000000000000AA
     ports:
       - "${DEV_APP_PORT:-5173}:5173"
@@ -145,3 +186,6 @@ volumes:
   dev_api_uploads:
   dev_app_node_modules:
   dev_npm_cache:
+  # Perfis persistentes do Chrome: sobrevivem a `make dev-down` e ao restart do
+  # container, exatamente como em produção.
+  dev_browser_profiles:

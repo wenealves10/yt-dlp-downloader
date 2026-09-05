@@ -76,7 +76,7 @@ func (s *Server) createDownload(ctx *gin.Context) {
 		return
 	}
 
-	videoInfo, err := helpers.GetVideoInfo(ctx, req.URL)
+	videoInfo, err := helpers.GetVideoInfo(ctx, s.accounts, req.URL)
 	if err != nil {
 		log.Printf("Failed to get video info: %v", err)
 		ctx.JSON(400, gin.H{"error": "Invalid URL or unsupported format"})

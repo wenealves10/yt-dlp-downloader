@@ -11,6 +11,7 @@ const (
 	TypeCreateTweetMusicQueue   = "create_tweet_music"
 	TypeDownloadExpirationQueue = "download_expiration"
 	TypeDeleteDownloadQueue     = "delete_download"
+	TypeYoutubeHealthCheckQueue = "youtube_health_check"
 )
 
 const (
@@ -30,4 +31,5 @@ const (
 	QueueWeightCreateTweetMusic = 10
 	QueueWeightFileExpiration   = 1
 	QueueWeightDeleteDownload   = 10
+	QueueWeightYoutubeHealth    = 1
 )
