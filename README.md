@@ -269,7 +269,10 @@ sh docker/builder/build-images.sh
 
 O script valida tudo **antes** do primeiro build e recusa configuração errada:
 chave PASETO com tamanho inválido, senha com caractere que quebra a URL do
-Postgres, site key de teste do Turnstile, proxy ligado sem URL. Descobrir isso
+Postgres, site key de teste do Turnstile, proxy ligado sem URL. Ele também
+renderiza o `docswarm.yaml` e reprova qualquer URL com variável não substituída
+— a interpolação do Compose não é recursiva, e uma URL montada pela metade só
+apareceria quando o container subisse. Descobrir isso
 depois de vinte minutos baixando o Chrome é uma espera que não se paga.
 
 Cinco imagens: `advideo-migrate`, `advideo-api`, `advideo-worker`,

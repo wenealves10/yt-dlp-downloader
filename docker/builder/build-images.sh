@@ -165,9 +165,38 @@ fi
 
 avisar SUPER_ADMIN_EMAIL "sem ele ninguém acessa o painel de contas do YouTube no primeiro deploy"
 
+# ---------------------------------------------------------------------------
+# Conferência do manifesto
+#
+# A interpolação do Compose NÃO é recursiva: em `${A:-texto${B}}` o default
+# fecha no primeiro `}` e o resto vira literal. O sintoma é uma URL montada pela
+# metade, e ela só aparece quando o container sobe — não no deploy.
+# ---------------------------------------------------------------------------
+MANIFESTO="$RAIZ/docker/builder/docswarm.yaml"
+
+if grep -q '\${[^}]*\${' "$MANIFESTO" 2>/dev/null; then
+    vermelho "  RUIM   $MANIFESTO tem \${...\${...}} aninhado — a interpolação do Compose não é recursiva:"
+    grep -n '\${[^}]*\${' "$MANIFESTO" | sed 's/^/         /' >&2
+    FALTOU=1
+fi
+
+# Renderiza o manifesto com este mesmo ambiente e confere as URLs montadas. Um
+# `${` sobrando dentro de uma URL é exatamente o sintoma acima.
+if docker stack config -c "$MANIFESTO" >/tmp/advideo-render.$$ 2>/dev/null; then
+    if grep -E '://[^[:space:]]*\$\{' /tmp/advideo-render.$$ >/dev/null 2>&1; then
+        vermelho "  RUIM   o manifesto renderizado tem URL com variável não substituída:"
+        grep -E '://[^[:space:]]*\$\{' /tmp/advideo-render.$$ | sed -E 's/:[^:@]{8,}@/:<senha>@/' | sed 's/^/         /' >&2
+        FALTOU=1
+    fi
+    rm -f /tmp/advideo-render.$$
+else
+    rm -f /tmp/advideo-render.$$
+    amarelo "  aviso  não deu para renderizar o manifesto com \`docker stack config\` (siga assim)"
+fi
+
 if [ "$FALTOU" -ne 0 ]; then
     vermelho ""
-    vermelho "não vou buildar com variável faltando. Corrija $ENV_FILE e rode de novo."
+    vermelho "não vou buildar com a configuração errada. Corrija e rode de novo."
     exit 1
 fi
 verde "  ok — nada faltando"

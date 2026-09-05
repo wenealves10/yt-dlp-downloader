@@ -41,9 +41,18 @@ x-redis: &redis
 
 x-banco: &banco
   DB_DRIVER: "postgres"
-  # EXTERNAL_DB_SOURCE tem precedência: preenchido, o serviço postgres abaixo
-  # deixa de ser necessário e pode ser removido.
-  DB_SOURCE: "${EXTERNAL_DB_SOURCE:-postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres-advideo:5432/${POSTGRES_DB}?sslmode=disable}"
+  # A URL é montada aqui, com as senhas vindo do stack.env — é o que evita o
+  # clássico "troquei a senha em um lugar só".
+  #
+  # NADA DE ${VAR:-padrao} com outra ${} dentro: a interpolação do Compose não é
+  # recursiva. Ela fecharia o default no primeiro `}` e montaria uma URL
+  # quebrada, com o erro aparecendo só na subida da API.
+  #
+  # Para usar um banco externo (Supabase, por exemplo), troque as duas linhas
+  # marcadas por "${EXTERNAL_DB_SOURCE}" — esta e a do serviço de migrations — e
+  # remova o serviço postgres-advideo lá embaixo.
+  # Banco externo: troque esta linha por "${EXTERNAL_DB_SOURCE}".
+  DB_SOURCE: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres-advideo:5432/${POSTGRES_DB}?sslmode=disable"
 
 # O downloader e o navegador remoto saem pelo mesmo caminho de rede: a sessão é
 # criada e usada pelo mesmo IP.
@@ -78,7 +87,8 @@ services:
       - "-path"
       - "/migrations"
       - "-database"
-      - "${EXTERNAL_DB_SOURCE:-postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres-advideo:5432/${POSTGRES_DB}?sslmode=disable}"
+      # Banco externo: troque esta linha por "${EXTERNAL_DB_SOURCE}".
+      - "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres-advideo:5432/${POSTGRES_DB}?sslmode=disable"
       - "up"
     networks:
       - advideo-internal

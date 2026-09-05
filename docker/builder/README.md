@@ -71,9 +71,17 @@ pela stack do Traefik, fora desta.
 
 ## Banco externo
 
-Para usar Supabase ou outro Postgres gerenciado, preencha `EXTERNAL_DB_SOURCE` e
-remova o serviço `postgres-advideo` do manifesto. As migrations continuam
-rodando pela stack, contra a URL que você informou.
+Para usar Supabase ou outro Postgres gerenciado:
+
+1. preencha `EXTERNAL_DB_SOURCE` no `stack.env`;
+2. no `docswarm.yaml`, troque as **duas** linhas marcadas com `Banco externo`
+   (a de `DB_SOURCE` e a do comando das migrations) por `"${EXTERNAL_DB_SOURCE}"`;
+3. remova o serviço `postgres-advideo`.
+
+O passo 2 não dá para automatizar: a interpolação do Compose **não é
+recursiva**, então `${EXTERNAL_DB_SOURCE:-postgres://${POSTGRES_USER}...}` não
+funciona — o default fecha no primeiro `}` e o resto vira texto literal. O
+`build-images.sh` recusa buildar se esse padrão aparecer no manifesto.
 
 ## O que NÃO está aqui
 
