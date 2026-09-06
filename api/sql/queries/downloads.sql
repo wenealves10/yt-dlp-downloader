@@ -88,9 +88,14 @@ UPDATE downloads
 SET status = 'PROCESSING', started_at = now(), error_message = NULL
 WHERE id = $1;
 
+-- error_message é a mensagem PÚBLICA, lida pelo cliente. error_detail é o motivo
+-- técnico e nunca sai para um usuário comum.
 -- name: MarkDownloadFinished :exec
 UPDATE downloads
-SET status = $2, error_message = sqlc.narg('error_message'), finished_at = now()
+SET status = $2,
+    error_message = sqlc.narg('error_message'),
+    error_detail = sqlc.narg('error_detail'),
+    finished_at = now()
 WHERE id = $1;
 
 -- Cancelar é idempotente: o filtro de status está no SET, não no WHERE. Com ele

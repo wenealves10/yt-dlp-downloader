@@ -266,6 +266,7 @@ type Download struct {
 	FinishedAt      pgtype.Timestamptz `json:"finished_at"`
 	Uploader        pgtype.Text        `json:"uploader"`
 	FormatHeight    int32              `json:"format_height"`
+	ErrorDetail     pgtype.Text        `json:"error_detail"`
 }
 
 type User struct {

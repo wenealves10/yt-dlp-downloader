@@ -331,6 +331,20 @@ tem a mesma barreira do seu lado — não desenha os campos de diagnóstico para
 quem não é super admin, para que um erro futuro de um dos lados não vire
 vazamento sozinho.
 
+### API e worker precisam ser reconstruídos JUNTOS
+
+Resolver e baixar rodam em imagens diferentes. Quando só uma é reconstruída, o
+sintoma é enganoso: **o link resolve e o download falha** — a API tem a
+dependência nova e o worker não. Foi o que aconteceu com o `curl-cffi`.
+
+Duas coisas tornam isso visível em vez de misterioso:
+
+- o painel de providers mostra as dependências **por etapa**, então um
+  `impersonação (curl-cffi): ausente` na etapa de Download aponta direto para a
+  imagem do worker;
+- quando um bloqueio acontece numa plataforma que exige impersonação e ela não
+  existe naquele processo, o detalhe do erro diz isso em vez de só "403".
+
 ### Por que falhou (só para o super admin)
 
 Esconder o motivo de **quem opera** transformava todo problema em adivinhação:
@@ -341,6 +355,12 @@ super admin**:
 - `detail` — o resumo do stderr (4 linhas, 500 caracteres, avisos removidos);
 - `session` — se a conta gerenciada chegou a ser usada, e qual. É a primeira
   pergunta quando algo falha numa plataforma que exige login.
+
+O mesmo vale para downloads já concluídos: `error_detail` guarda o motivo
+técnico ao lado da mensagem pública, e a listagem do histórico só o devolve (e
+só devolve o nome do provider) quando quem pede é super admin. Sem isso, uma
+falha de download exigia caçar a linha no log do container — justamente o que o
+histórico deveria evitar.
 
 Para qualquer outro papel a API não envia nenhum dos dois; a mensagem de domínio
 continua sendo tudo que o usuário comum vê.

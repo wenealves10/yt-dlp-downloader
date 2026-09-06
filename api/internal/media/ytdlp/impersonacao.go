@@ -2,6 +2,7 @@ package ytdlp
 
 import (
 	"context"
+	"errors"
 	"log"
 	"os/exec"
 	"strings"
@@ -90,4 +91,37 @@ func (p *Provider) argsImpersonacao(plataforma media.Platform) []string {
 // coisa — uma incoerência que é, ela mesma, sinal de automação.
 func (p *Provider) usaImpersonacao(plataforma media.Platform) bool {
 	return len(p.argsImpersonacao(plataforma)) > 0
+}
+
+// avisoImpersonacaoFaltando explica um bloqueio quando a causa provável está
+// dentro do container, e não na plataforma.
+//
+// É o caso que confunde mais: a API resolve o link e o worker falha ao baixar,
+// porque só uma das duas imagens foi reconstruída com o extra `curl-cffi`. Sem
+// esta frase, o painel mostra "403" nos dois casos e nada distingue "a
+// plataforma bloqueou nosso IP" de "esta imagem está sem a dependência".
+const avisoImpersonacaoFaltando = "impersonação indisponível NESTE processo: " +
+	"reconstrua a imagem com o extra curl-cffi do yt-dlp"
+
+// explicarBloqueio acrescenta a causa provável ao detalhe do erro, quando ela é
+// conhecida. Só toca em erro de bloqueio: em qualquer outro, a impersonação não
+// tem nada a ver com o desfecho.
+func (p *Provider) explicarBloqueio(err error, plataforma media.Platform) error {
+	if err == nil {
+		return nil
+	}
+	if !plataformasQueExigemImpersonacao[plataforma] || p.suportaImpersonacao() {
+		return err
+	}
+
+	var domainErr *media.Error
+	if !errors.As(err, &domainErr) || !errors.Is(domainErr.Kind, media.ErrBlocked) {
+		return err
+	}
+
+	detalhe := avisoImpersonacaoFaltando
+	if domainErr.Detail != "" {
+		detalhe = domainErr.Detail + " | " + detalhe
+	}
+	return &media.Error{Kind: domainErr.Kind, Detail: detalhe}
 }

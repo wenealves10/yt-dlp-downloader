@@ -339,7 +339,7 @@ func (q *Queries) AdminGetUserDetail(ctx context.Context, id uuid.UUID) (AdminGe
 const adminListDownloads = `-- name: AdminListDownloads :many
 
 SELECT
-  d.id, d.user_id, d.original_url, d.title, d.format, d.status, d.thumbnail_url, d.file_url, d.expires_at, d.duration_seconds, d.error_message, d.created_at, d.deleted_at, d.file_size_bytes, d.platform, d.provider, d.format_id, d.quality_label, d.progress_percent, d.downloaded_bytes, d.total_bytes, d.speed_bps, d.eta_seconds, d.started_at, d.finished_at, d.uploader, d.format_height,
+  d.id, d.user_id, d.original_url, d.title, d.format, d.status, d.thumbnail_url, d.file_url, d.expires_at, d.duration_seconds, d.error_message, d.created_at, d.deleted_at, d.file_size_bytes, d.platform, d.provider, d.format_id, d.quality_label, d.progress_percent, d.downloaded_bytes, d.total_bytes, d.speed_bps, d.eta_seconds, d.started_at, d.finished_at, d.uploader, d.format_height, d.error_detail,
   u.full_name AS user_name,
   u.email AS user_email
 FROM downloads d
@@ -392,6 +392,7 @@ type AdminListDownloadsRow struct {
 	FinishedAt      pgtype.Timestamptz `json:"finished_at"`
 	Uploader        pgtype.Text        `json:"uploader"`
 	FormatHeight    int32              `json:"format_height"`
+	ErrorDetail     pgtype.Text        `json:"error_detail"`
 	UserName        string             `json:"user_name"`
 	UserEmail       string             `json:"user_email"`
 }
@@ -442,6 +443,7 @@ func (q *Queries) AdminListDownloads(ctx context.Context, arg AdminListDownloads
 			&i.FinishedAt,
 			&i.Uploader,
 			&i.FormatHeight,
+			&i.ErrorDetail,
 			&i.UserName,
 			&i.UserEmail,
 		); err != nil {

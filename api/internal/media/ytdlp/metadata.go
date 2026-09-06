@@ -74,7 +74,7 @@ func (p *Provider) Metadata(ctx context.Context, parsed *url.URL, opts media.Met
 		bruto.WriteString(linha)
 	})
 	if err != nil {
-		return nil, classificar(err, stderr)
+		return nil, p.explicarBloqueio(classificar(err, stderr), media.PlatformFor(parsed))
 	}
 
 	var saida saidaJSON

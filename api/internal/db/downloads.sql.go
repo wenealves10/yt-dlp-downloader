@@ -26,7 +26,7 @@ SET status = CASE
 WHERE id = $1
   AND user_id = $2
   AND deleted_at IS NULL
-RETURNING id, user_id, original_url, title, format, status, thumbnail_url, file_url, expires_at, duration_seconds, error_message, created_at, deleted_at, file_size_bytes, platform, provider, format_id, quality_label, progress_percent, downloaded_bytes, total_bytes, speed_bps, eta_seconds, started_at, finished_at, uploader, format_height
+RETURNING id, user_id, original_url, title, format, status, thumbnail_url, file_url, expires_at, duration_seconds, error_message, created_at, deleted_at, file_size_bytes, platform, provider, format_id, quality_label, progress_percent, downloaded_bytes, total_bytes, speed_bps, eta_seconds, started_at, finished_at, uploader, format_height, error_detail
 `
 
 type CancelDownloadParams struct {
@@ -71,6 +71,7 @@ func (q *Queries) CancelDownload(ctx context.Context, arg CancelDownloadParams) 
 		&i.FinishedAt,
 		&i.Uploader,
 		&i.FormatHeight,
+		&i.ErrorDetail,
 	)
 	return i, err
 }
@@ -95,7 +96,7 @@ INSERT INTO downloads (
 VALUES (
   $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
 )
-RETURNING id, user_id, original_url, title, format, status, thumbnail_url, file_url, expires_at, duration_seconds, error_message, created_at, deleted_at, file_size_bytes, platform, provider, format_id, quality_label, progress_percent, downloaded_bytes, total_bytes, speed_bps, eta_seconds, started_at, finished_at, uploader, format_height
+RETURNING id, user_id, original_url, title, format, status, thumbnail_url, file_url, expires_at, duration_seconds, error_message, created_at, deleted_at, file_size_bytes, platform, provider, format_id, quality_label, progress_percent, downloaded_bytes, total_bytes, speed_bps, eta_seconds, started_at, finished_at, uploader, format_height, error_detail
 `
 
 type CreateDownloadParams struct {
@@ -155,6 +156,7 @@ func (q *Queries) CreateDownload(ctx context.Context, arg CreateDownloadParams) 
 		&i.FinishedAt,
 		&i.Uploader,
 		&i.FormatHeight,
+		&i.ErrorDetail,
 	)
 	return i, err
 }
@@ -168,7 +170,7 @@ INSERT INTO downloads (
 VALUES (
   $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
 )
-RETURNING id, user_id, original_url, title, format, status, thumbnail_url, file_url, expires_at, duration_seconds, error_message, created_at, deleted_at, file_size_bytes, platform, provider, format_id, quality_label, progress_percent, downloaded_bytes, total_bytes, speed_bps, eta_seconds, started_at, finished_at, uploader, format_height
+RETURNING id, user_id, original_url, title, format, status, thumbnail_url, file_url, expires_at, duration_seconds, error_message, created_at, deleted_at, file_size_bytes, platform, provider, format_id, quality_label, progress_percent, downloaded_bytes, total_bytes, speed_bps, eta_seconds, started_at, finished_at, uploader, format_height, error_detail
 `
 
 type CreateMediaDownloadParams struct {
@@ -236,6 +238,7 @@ func (q *Queries) CreateMediaDownload(ctx context.Context, arg CreateMediaDownlo
 		&i.FinishedAt,
 		&i.Uploader,
 		&i.FormatHeight,
+		&i.ErrorDetail,
 	)
 	return i, err
 }
@@ -252,7 +255,7 @@ func (q *Queries) DeleteDownload(ctx context.Context, id uuid.UUID) error {
 }
 
 const getDownloadByID = `-- name: GetDownloadByID :one
-SELECT id, user_id, original_url, title, format, status, thumbnail_url, file_url, expires_at, duration_seconds, error_message, created_at, deleted_at, file_size_bytes, platform, provider, format_id, quality_label, progress_percent, downloaded_bytes, total_bytes, speed_bps, eta_seconds, started_at, finished_at, uploader, format_height FROM downloads
+SELECT id, user_id, original_url, title, format, status, thumbnail_url, file_url, expires_at, duration_seconds, error_message, created_at, deleted_at, file_size_bytes, platform, provider, format_id, quality_label, progress_percent, downloaded_bytes, total_bytes, speed_bps, eta_seconds, started_at, finished_at, uploader, format_height, error_detail FROM downloads
 WHERE id = $1
   AND deleted_at IS NULL
 `
@@ -288,12 +291,13 @@ func (q *Queries) GetDownloadByID(ctx context.Context, id uuid.UUID) (Download, 
 		&i.FinishedAt,
 		&i.Uploader,
 		&i.FormatHeight,
+		&i.ErrorDetail,
 	)
 	return i, err
 }
 
 const getDownloadsByUser = `-- name: GetDownloadsByUser :many
-SELECT id, user_id, original_url, title, format, status, thumbnail_url, file_url, expires_at, duration_seconds, error_message, created_at, deleted_at, file_size_bytes, platform, provider, format_id, quality_label, progress_percent, downloaded_bytes, total_bytes, speed_bps, eta_seconds, started_at, finished_at, uploader, format_height FROM downloads
+SELECT id, user_id, original_url, title, format, status, thumbnail_url, file_url, expires_at, duration_seconds, error_message, created_at, deleted_at, file_size_bytes, platform, provider, format_id, quality_label, progress_percent, downloaded_bytes, total_bytes, speed_bps, eta_seconds, started_at, finished_at, uploader, format_height, error_detail FROM downloads
 WHERE user_id = $1 
   AND deleted_at IS NULL
 ORDER BY created_at DESC
@@ -343,6 +347,7 @@ func (q *Queries) GetDownloadsByUser(ctx context.Context, arg GetDownloadsByUser
 			&i.FinishedAt,
 			&i.Uploader,
 			&i.FormatHeight,
+			&i.ErrorDetail,
 		); err != nil {
 			return nil, err
 		}
@@ -355,7 +360,7 @@ func (q *Queries) GetDownloadsByUser(ctx context.Context, arg GetDownloadsByUser
 }
 
 const getDownloadsExpired = `-- name: GetDownloadsExpired :many
-SELECT id, user_id, original_url, title, format, status, thumbnail_url, file_url, expires_at, duration_seconds, error_message, created_at, deleted_at, file_size_bytes, platform, provider, format_id, quality_label, progress_percent, downloaded_bytes, total_bytes, speed_bps, eta_seconds, started_at, finished_at, uploader, format_height
+SELECT id, user_id, original_url, title, format, status, thumbnail_url, file_url, expires_at, duration_seconds, error_message, created_at, deleted_at, file_size_bytes, platform, provider, format_id, quality_label, progress_percent, downloaded_bytes, total_bytes, speed_bps, eta_seconds, started_at, finished_at, uploader, format_height, error_detail
 FROM downloads
 WHERE status = 'COMPLETED'
   AND deleted_at IS NULL
@@ -400,6 +405,7 @@ func (q *Queries) GetDownloadsExpired(ctx context.Context) ([]Download, error) {
 			&i.FinishedAt,
 			&i.Uploader,
 			&i.FormatHeight,
+			&i.ErrorDetail,
 		); err != nil {
 			return nil, err
 		}
@@ -413,7 +419,10 @@ func (q *Queries) GetDownloadsExpired(ctx context.Context) ([]Download, error) {
 
 const markDownloadFinished = `-- name: MarkDownloadFinished :exec
 UPDATE downloads
-SET status = $2, error_message = $3, finished_at = now()
+SET status = $2,
+    error_message = $3,
+    error_detail = $4,
+    finished_at = now()
 WHERE id = $1
 `
 
@@ -421,10 +430,18 @@ type MarkDownloadFinishedParams struct {
 	ID           uuid.UUID          `json:"id"`
 	Status       CoreDownloadStatus `json:"status"`
 	ErrorMessage pgtype.Text        `json:"error_message"`
+	ErrorDetail  pgtype.Text        `json:"error_detail"`
 }
 
+// error_message é a mensagem PÚBLICA, lida pelo cliente. error_detail é o motivo
+// técnico e nunca sai para um usuário comum.
 func (q *Queries) MarkDownloadFinished(ctx context.Context, arg MarkDownloadFinishedParams) error {
-	_, err := q.db.Exec(ctx, markDownloadFinished, arg.ID, arg.Status, arg.ErrorMessage)
+	_, err := q.db.Exec(ctx, markDownloadFinished,
+		arg.ID,
+		arg.Status,
+		arg.ErrorMessage,
+		arg.ErrorDetail,
+	)
 	return err
 }
 

@@ -28,6 +28,7 @@ interface Job {
   sizeBytes?: number;
   progress?: DownloadProgress;
   errorMessage?: string;
+  errorDetail?: string;
 }
 
 export function formatSeconds(seconds: number): string {
@@ -46,6 +47,9 @@ export function formatSeconds(seconds: number): string {
 
 interface DownloadCardProps {
   job: Job;
+  // Só o super admin vê o motivo técnico; para o cliente final a falha é
+  // sempre a mensagem genérica.
+  mostrarDiagnostico?: boolean;
   onDownload: (id: string) => void;
   onRemove: (id: string) => void;
   onCancel?: (id: string) => void;
@@ -58,6 +62,7 @@ export const DownloadCard: React.FC<DownloadCardProps> = ({
   onRemove,
   onCancel,
   isDownloading = false,
+  mostrarDiagnostico = false,
 }) => {
   const [timeLeft, setTimeLeft] = useState("");
   const [confirmarRemocao, setConfirmarRemocao] = useState(false);
@@ -143,10 +148,17 @@ export const DownloadCard: React.FC<DownloadCardProps> = ({
           )}
 
           {job.status === "error" && job.errorMessage && (
-            <p className="mt-2 flex items-start gap-1.5 text-sm text-red-400">
-              <AlertTriangle size={14} className="mt-0.5 shrink-0" />
-              {job.errorMessage}
-            </p>
+            <div className="mt-2">
+              <p className="flex items-start gap-1.5 text-sm text-red-400">
+                <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+                {job.errorMessage}
+              </p>
+              {mostrarDiagnostico && job.errorDetail && (
+                <p className="mt-1 pl-5 text-xs font-mono text-red-400/60 break-words">
+                  {job.errorDetail}
+                </p>
+              )}
+            </div>
           )}
 
           {job.status === "complete" && timeLeft && (

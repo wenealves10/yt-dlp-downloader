@@ -42,14 +42,64 @@ type downloadResponse struct {
 	FileUrl         string                `json:"file_url,omitempty"`
 	ExpiresAt       string                `json:"expires_at,omitempty"`
 	DurationSeconds int32                 `json:"duration_seconds,omitempty"`
-	ErrorMessage    string                `json:"error_message,omitempty"`
-	CreatedAt       string                `json:"created_at"`
-	Platform        string                `json:"platform,omitempty"`
-	PlatformLabel   string                `json:"platform_label,omitempty"`
-	Provider        string                `json:"provider,omitempty"`
-	QualityLabel    string                `json:"quality_label,omitempty"`
-	Uploader        string                `json:"uploader,omitempty"`
-	FileSizeBytes   int64                 `json:"file_size_bytes,omitempty"`
+	// ErrorMessage é a mensagem PÚBLICA. O motivo técnico vai em ErrorDetail e
+	// só é preenchido para o super admin.
+	ErrorMessage  string `json:"error_message,omitempty"`
+	ErrorDetail   string `json:"error_detail,omitempty"`
+	CreatedAt     string `json:"created_at"`
+	Platform      string `json:"platform,omitempty"`
+	PlatformLabel string `json:"platform_label,omitempty"`
+	// Provider é o nome do mecanismo interno ("yt-dlp"). Também só sai para o
+	// super admin: o cliente final não tem por que saber com o que baixamos.
+	Provider      string `json:"provider,omitempty"`
+	QualityLabel  string `json:"quality_label,omitempty"`
+	Uploader      string `json:"uploader,omitempty"`
+	FileSizeBytes int64  `json:"file_size_bytes,omitempty"`
+}
+
+// formatarInstante protege contra o ponteiro nulo do modelo gerado.
+func formatarInstante(instante *time.Time) string {
+	if instante == nil {
+		return ""
+	}
+	return instante.Format(time.RFC3339)
+}
+
+// montarDownloadResponse traduz a linha do banco para a resposta da API.
+//
+// O parâmetro `operador` é o que separa as duas visões, e está numa função só
+// para não haver dois lugares decidindo o que pode sair: o cliente final recebe
+// a mensagem pública e nada mais; o super admin recebe também o motivo técnico
+// e o nome do mecanismo interno, que é o que permite diagnosticar sem entrar no
+// container.
+func montarDownloadResponse(download db.Download, operador bool) downloadResponse {
+	item := downloadResponse{
+		ID:              download.ID.String(),
+		Title:           download.Title,
+		Status:          download.Status,
+		OriginalUrl:     download.OriginalUrl,
+		ThumbnailUrl:    download.ThumbnailUrl.String,
+		FileUrl:         download.FileUrl.String,
+		DurationSeconds: download.DurationSeconds.Int32,
+		ExpiresAt:       download.ExpiresAt.Time.Format(time.RFC3339),
+		ErrorMessage:    download.ErrorMessage.String,
+		Format:          download.Format,
+		// CreatedAt é ponteiro no modelo gerado. A coluna é NOT NULL, mas
+		// desreferenciar sem guarda transforma uma linha inesperada em pânico
+		// que derruba a listagem inteira — e não só aquele item.
+		CreatedAt:     formatarInstante(download.CreatedAt),
+		Platform:      download.Platform,
+		PlatformLabel: media.Platform(download.Platform).Label(),
+		QualityLabel:  download.QualityLabel.String,
+		Uploader:      download.Uploader.String,
+		FileSizeBytes: download.FileSizeBytes,
+	}
+
+	if operador {
+		item.ErrorDetail = download.ErrorDetail.String
+		item.Provider = download.Provider.String
+	}
+	return item
 }
 
 // createDownload é o endpoint antigo, mantido para clientes que já existiam.
@@ -116,27 +166,15 @@ func (s *Server) getDownloads(ctx *gin.Context) {
 		return
 	}
 
+	// O detalhe técnico e o nome do provider só saem para quem opera.
+	operador := false
+	if user, existe := currentUser(ctx); existe {
+		operador = user.Role == db.CoreUserRoleSuperAdmin
+	}
+
 	var response []downloadResponse
 	for _, download := range downloads {
-		response = append(response, downloadResponse{
-			ID:              download.ID.String(),
-			Title:           download.Title,
-			Status:          download.Status,
-			OriginalUrl:     download.OriginalUrl,
-			ThumbnailUrl:    download.ThumbnailUrl.String,
-			FileUrl:         download.FileUrl.String,
-			DurationSeconds: download.DurationSeconds.Int32,
-			ExpiresAt:       download.ExpiresAt.Time.Format(time.RFC3339),
-			ErrorMessage:    download.ErrorMessage.String,
-			Format:          download.Format,
-			CreatedAt:       download.CreatedAt.Format(time.RFC3339),
-			Platform:        download.Platform,
-			PlatformLabel:   media.Platform(download.Platform).Label(),
-			Provider:        download.Provider.String,
-			QualityLabel:    download.QualityLabel.String,
-			Uploader:        download.Uploader.String,
-			FileSizeBytes:   download.FileSizeBytes,
-		})
+		response = append(response, montarDownloadResponse(download, operador))
 	}
 
 	ctx.JSON(http.StatusOK, gin.H{

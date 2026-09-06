@@ -342,10 +342,19 @@ func (p *JobDownloadMedia) registrarFalha(ctx context.Context, download db.Downl
 		log.Printf("jobs: detalhe id=%s: %s", download.ID, detalhe)
 	}
 
+	// O detalhe fica gravado ao lado da mensagem pública, e não no lugar dela:
+	// é o que permite ao super admin ver no histórico por que um download
+	// falhou, sem precisar caçar a linha no log do container.
+	detalhe := media.Detail(err)
+	if detalhe == "" {
+		detalhe = media.UserMessage(err)
+	}
+
 	if erroGravacao := p.store.MarkDownloadFinished(gravacaoCtx, db.MarkDownloadFinishedParams{
 		ID:           download.ID,
 		Status:       status,
 		ErrorMessage: pgtype.Text{String: mensagem, Valid: mensagem != ""},
+		ErrorDetail:  pgtype.Text{String: detalhe, Valid: detalhe != ""},
 	}); erroGravacao != nil {
 		log.Printf("jobs: falha ao gravar desfecho id=%s: %v", download.ID, erroGravacao)
 	}

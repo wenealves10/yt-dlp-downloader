@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/wenealves10/yt-dlp-downloader/internal/db"
 	"github.com/wenealves10/yt-dlp-downloader/internal/media"
 )
@@ -165,5 +166,33 @@ func TestDescricaoDaSessao(t *testing.T) {
 		if obtido := caso.sessao.Descricao(); obtido != caso.esperado {
 			t.Errorf("[%s] esperado %q, obtido %q", caso.nome, caso.esperado, obtido)
 		}
+	}
+}
+
+// O histórico é lido pelo cliente final. O motivo técnico e o nome do mecanismo
+// interno não podem sair nele — nem por descuido de quem montar a resposta.
+func TestRespostaDoHistoricoEscondeInternoDeUsuarioComum(t *testing.T) {
+	linha := db.Download{
+		ErrorMessage: pgtype.Text{String: media.PublicMessage(media.ErrBlocked), Valid: true},
+		ErrorDetail:  pgtype.Text{String: "HTTP Error 403: Blocked | curl-cffi", Valid: true},
+		Provider:     pgtype.Text{String: "yt-dlp", Valid: true},
+	}
+
+	// Usuário comum: só a mensagem pública.
+	comum := montarDownloadResponse(linha, false)
+	if comum.ErrorDetail != "" {
+		t.Errorf("o detalhe técnico vazou: %q", comum.ErrorDetail)
+	}
+	if comum.Provider != "" {
+		t.Errorf("o nome do mecanismo vazou: %q", comum.Provider)
+	}
+	if comum.ErrorMessage != media.PublicMessage(media.ErrBlocked) {
+		t.Errorf("a mensagem pública deveria estar presente, obteve %q", comum.ErrorMessage)
+	}
+
+	// Super admin: vê tudo, que é como diagnosticar sem entrar no container.
+	operador := montarDownloadResponse(linha, true)
+	if operador.ErrorDetail == "" || operador.Provider == "" {
+		t.Error("o super admin precisa do detalhe e do provider para diagnosticar")
 	}
 }

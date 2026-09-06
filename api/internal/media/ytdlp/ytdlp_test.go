@@ -562,3 +562,51 @@ func TestImpersonacaoNaoVazaParaPlataformaForaDaLista(t *testing.T) {
 	require.NotContains(t, provider.argsBase(media.PlatformYouTube), "--impersonate")
 	require.Contains(t, provider.argsBase(media.PlatformReddit), "--impersonate")
 }
+
+// O caso que mais confunde: a API resolve o link e o worker falha ao baixar,
+// porque só uma das duas imagens foi reconstruída com curl-cffi. Sem esta
+// explicação, os dois casos mostram "403" e nada distingue "a plataforma
+// bloqueou nosso IP" de "esta imagem está sem a dependência".
+func TestExplicarBloqueioApontaImpersonacaoAusente(t *testing.T) {
+	semSuporte := New(Config{Binary: filepath.Join(t.TempDir(), "inexistente")})
+	bloqueio := &media.Error{Kind: media.ErrBlocked, Detail: "HTTP Error 403: Blocked"}
+
+	explicado := semSuporte.explicarBloqueio(bloqueio, media.PlatformTwitter)
+
+	require.ErrorIs(t, explicado, media.ErrBlocked, "o tipo do erro não muda")
+	require.Contains(t, media.Detail(explicado), "403", "o detalhe original é preservado")
+	require.Contains(t, media.Detail(explicado), "curl-cffi")
+	// E a mensagem pública continua genérica, como manda a regra.
+	require.Equal(t, media.PublicMessage(media.ErrBlocked), media.PublicMessage(explicado))
+}
+
+// Com impersonação disponível, o bloqueio é da plataforma mesmo: culpar a
+// dependência mandaria o administrador procurar no lugar errado.
+func TestExplicarBloqueioNaoCulpaDependenciaQuandoElaExiste(t *testing.T) {
+	comSuporte := New(Config{
+		Binary: binarioFalso(t, "yt-dlp", "Chrome-136      Macos-15     curl_cffi"),
+	})
+	bloqueio := &media.Error{Kind: media.ErrBlocked, Detail: "HTTP Error 403: Blocked"}
+
+	explicado := comSuporte.explicarBloqueio(bloqueio, media.PlatformTwitter)
+
+	require.NotContains(t, media.Detail(explicado), "curl-cffi")
+}
+
+// Plataforma que não usa impersonação, e erro que não é bloqueio, passam
+// intactos.
+func TestExplicarBloqueioNaoTocaNoQueNaoEhSeuCaso(t *testing.T) {
+	semSuporte := New(Config{Binary: filepath.Join(t.TempDir(), "inexistente")})
+
+	bloqueioNoYoutube := &media.Error{Kind: media.ErrBlocked, Detail: "403"}
+	require.NotContains(t,
+		media.Detail(semSuporte.explicarBloqueio(bloqueioNoYoutube, media.PlatformYouTube)),
+		"curl-cffi")
+
+	privado := &media.Error{Kind: media.ErrContentPrivate, Detail: "private video"}
+	require.NotContains(t,
+		media.Detail(semSuporte.explicarBloqueio(privado, media.PlatformTwitter)),
+		"curl-cffi")
+
+	require.Nil(t, semSuporte.explicarBloqueio(nil, media.PlatformTwitter))
+}

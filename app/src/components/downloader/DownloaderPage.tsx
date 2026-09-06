@@ -34,6 +34,7 @@ interface Job {
   sizeBytes?: number;
   progress?: DownloadProgress;
   errorMessage?: string;
+  errorDetail?: string;
 }
 
 function convertStatus(apiStatus: string): Job["status"] {
@@ -90,6 +91,7 @@ export const DownloaderPage: React.FC = () => {
         quality: item.quality_label,
         sizeBytes: item.file_size_bytes,
         errorMessage: item.error_message,
+        errorDetail: item.error_detail,
       }));
 
       // O histórico não traz o progresso ao vivo — ele chega por SSE. Trocar a
@@ -134,6 +136,7 @@ export const DownloaderPage: React.FC = () => {
             // conhecido evita a barra sumir e voltar durante a transição.
             progress: data.progress ?? anterior.progress,
             errorMessage: data.error_message || anterior.errorMessage,
+            errorDetail: anterior.errorDetail,
           };
           return updatedJobs;
         }
@@ -245,6 +248,7 @@ export const DownloaderPage: React.FC = () => {
                   onRemove={handleRemoveJob}
                   onCancel={handleCancel}
                   isDownloading={downloadingJobID === job.id}
+                  mostrarDiagnostico={user?.role === "super_admin"}
                 />
               ))}
             </div>

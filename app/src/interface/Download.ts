@@ -25,6 +25,9 @@ export interface Download {
   uploader?: string;
   file_size_bytes?: number;
   error_message?: string;
+  // Motivo técnico da falha. A API só o envia ao super admin; o cliente final
+  // recebe apenas error_message, que é genérica.
+  error_detail?: string;
   // Só chega pelo evento SSE; o histórico devolve o último estado gravado.
   progress?: DownloadProgress;
 }

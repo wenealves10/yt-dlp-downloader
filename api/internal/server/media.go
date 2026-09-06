@@ -268,7 +268,8 @@ func (s *Server) criarDownloadMedia(ctx *gin.Context, req criarDownloadMediaRequ
 		_ = s.store.MarkDownloadFinished(ctx.Request.Context(), db.MarkDownloadFinishedParams{
 			ID:           download.ID,
 			Status:       db.CoreDownloadStatusFAILED,
-			ErrorMessage: pgtype.Text{String: "não foi possível iniciar o download", Valid: true},
+			ErrorMessage: pgtype.Text{String: media.PublicMessage(media.ErrDownloadFailed), Valid: true},
+			ErrorDetail:  pgtype.Text{String: "falha ao enfileirar a tarefa de download", Valid: true},
 		})
 		ctx.JSON(http.StatusInternalServerError, errorResponse(errors.New("não foi possível iniciar o download")))
 		return

@@ -103,6 +103,8 @@ type Querier interface {
 	GetYoutubeAccountByID(ctx context.Context, id uuid.UUID) (YoutubeAccount, error)
 	GetYoutubeAccounts(ctx context.Context) ([]YoutubeAccount, error)
 	GetYoutubeAccountsForHealthCheck(ctx context.Context) ([]YoutubeAccount, error)
+	// error_message é a mensagem PÚBLICA, lida pelo cliente. error_detail é o motivo
+	// técnico e nunca sai para um usuário comum.
 	MarkDownloadFinished(ctx context.Context, arg MarkDownloadFinishedParams) error
 	MarkDownloadStarted(ctx context.Context, id uuid.UUID) error
 	// Gravado pelo worker logo após o upload. É o que sustenta as métricas de

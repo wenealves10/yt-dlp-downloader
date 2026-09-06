@@ -81,7 +81,7 @@ func (p *Provider) Download(
 		}
 	})
 	if err != nil {
-		return nil, classificar(err, stderr)
+		return nil, p.explicarBloqueio(classificar(err, stderr), plataformaDaURL(req.URL))
 	}
 
 	caminho, tamanho, err := arquivoFinal(saidaAbs, req.Filename, informado)
