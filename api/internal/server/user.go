@@ -137,6 +137,14 @@ func (s *Server) login(ctx *gin.Context) {
 		return
 	}
 
+	// Conta bloqueada pelo painel não recebe token. O authMiddleware já barraria
+	// cada requisição depois, mas emitir o token faria a tela entrar e só então
+	// falhar em tudo — o administrador bloqueia esperando porta fechada.
+	if !user.Active {
+		ctx.JSON(http.StatusForbidden, errorResponse(errors.New("conta desativada")))
+		return
+	}
+
 	accessToken, err := s.tokenCreator.CreateToken(user.Email, user.ID.String(), s.config.AccessTokenDuration)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, errorResponse(err))

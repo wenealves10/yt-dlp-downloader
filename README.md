@@ -20,7 +20,9 @@
 
 ## 🧱 Funcionalidades
 
-- 🔗 Envio de URL para download (`POST /downloads`)
+- 🔗 Download multiplataforma: cole o link e o sistema identifica a origem
+- 🎚️ Escolha de qualidade com tamanho estimado
+- 📶 Progresso em tempo real (percentual, velocidade, ETA) e cancelamento
 - ⏳ Processamento assíncrono com fila (Redis + Asynq)
 - 📥 Execução de download com yt-dlp
 - 🔁 Envio de status em tempo real via SSE (`GET /downloads/:id/stream`)
@@ -44,6 +46,9 @@ yt-dlp-downloader/
 │   ├── db/         # Código gerado pelo sqlc
 │   ├── browser/    # Cliente do serviço de navegador
 │   ├── browserd/   # Implementação do serviço de navegador
+│   ├── media/      # Contrato de download; media/ytdlp é a única parte que
+│   │               # conhece o binário
+│   ├── providers/  # Monta o conjunto de providers
 │   ├── ytaccounts/ # Sessões das contas entregues ao downloader
 │   └── libs/       # Storage (R2) e streams do Redis
 ├── compose.dev.yaml    # Ambiente local completo
@@ -126,6 +131,173 @@ make dev-down
 ```
 
 ---
+
+---
+
+---
+
+## 🌐 Download multiplataforma
+
+O usuário cola qualquer link público, o sistema identifica a plataforma sozinho,
+mostra título, miniatura, duração e as qualidades disponíveis, e baixa com
+progresso em tempo real.
+
+```
+URL → normalização → detecção de plataforma → provider → metadados
+    → escolha de qualidade → job → download com progresso → R2
+```
+
+### Arquitetura
+
+O núcleo não sabe o que é yt-dlp. Quem sabe é uma única implementação, e trocá-la
+não alcança handlers, jobs, banco ou frontend.
+
+| Pacote | Responsabilidade |
+|---|---|
+| `internal/media` | Contrato (`Provider`), tipos, erros de domínio, detecção de plataforma, normalização de URL |
+| `internal/media/ytdlp` | A **única** parte que conhece o binário: argumentos, progresso, erros |
+| `internal/providers` | Monta o conjunto de providers a partir da configuração |
+
+A interface é curta de propósito — formatos vêm dentro dos metadados (pedi-los à
+parte dobraria a ida à plataforma) e o cancelamento é `context.Context`, que é
+como Go já expressa isso:
+
+```go
+type Provider interface {
+    Name() string
+    CanHandle(*url.URL) bool
+    Metadata(ctx, *url.URL) (*Metadata, error)
+    Download(ctx, Request, ProgressFunc) (*Result, error)
+    Health(ctx) Health
+}
+```
+
+**Plataforma e provider são conceitos distintos**, e por isso são colunas
+distintas no banco. Hoje todas as plataformas são atendidas pelo yt-dlp; somar um
+provider dedicado no futuro é acrescentar uma linha em
+`internal/providers/providers.go`:
+
+```go
+return media.NewRegistry(instagramProvider, tiktokProvider, ytdlpProvider)
+```
+
+O registry tenta na ordem, e o yt-dlp fica por último como fallback geral. O
+fallback só dispara para falhas de **disponibilidade**: vídeo privado, ao vivo ou
+removido não reentra, porque o próximo provider chegaria à mesma conclusão.
+
+### Segurança da URL
+
+`media.NormalizeURL` é a fronteira entre entrada não confiável e o resto do
+sistema. Recusa esquema que não seja http(s) (fecha `file:///etc/passwd`),
+endereços de rede interna (`localhost`, faixas privadas, `169.254.169.254`,
+`redis:6379`), caracteres de controle e URL começando com hífen. Descarta
+credenciais embutidas e o fragmento antes de gravar.
+
+A detecção de plataforma usa um mapa de domínios registráveis com regra de
+sufixo, e não `strings.Contains` — `youtube.com.site-falso.net` não é o YouTube.
+
+O comando nunca é montado por concatenação: os argumentos vão estruturados para o
+`exec`, sem shell, e `--` separa as opções da URL. O `format_id` e o nome do
+arquivo passam por expressão regular antes de virarem argumento.
+
+### Progresso e cancelamento
+
+O progresso sai do `--progress-template` do yt-dlp com um prefixo próprio,
+trafega por SSE (o mesmo Redis Stream do resto) e é gravado no banco a cada 10 s
+— só o suficiente para a tela reabrir no meio de um download.
+
+O cancelamento marca no banco e grava uma chave no Redis. O worker observa essa
+chave a cada 2 s **independente do progresso**: um download que está resolvendo
+ou pós-processando não emite atualização, e depender do callback deixaria esses
+momentos sem resposta. O processo roda em grupo próprio (`Setpgid`), então o
+SIGKILL alcança o ffmpeg junto — sem isso ficaria um órfão escrevendo em disco.
+
+### Arquivos temporários
+
+Cada download tem um diretório próprio, removido no fim — sucesso, falha ou
+cancelamento. Um container derrubado no meio não roda essa limpeza, então o
+worker também varre sobras na subida e de hora em hora. Durante o
+desenvolvimento isso recuperou 2,4 GB de uma tacada.
+
+### Erros
+
+A saída bruta do yt-dlp **nunca** chega ao usuário. `internal/media/ytdlp/errors.go`
+traduz para erros de domínio (`ErrContentPrivate`, `ErrGeoBlocked`,
+`ErrLiveContent`, `ErrRateLimited`…), a tela recebe a mensagem e um código
+estável, e o detalhe técnico fica no log. Erros de conteúdo não são
+reenfileirados: um vídeo privado continuará privado na terceira tentativa.
+
+### Diagnóstico
+
+`/admin/providers` mostra o estado do mecanismo — versão do yt-dlp, ffmpeg e
+runtime JavaScript, e quais estão ausentes. Para diagnóstico pela linha de
+comando existe `cmd/mediaprobe`, que fica fora das imagens de produção:
+
+```sh
+go run ./cmd/mediaprobe health
+go run ./cmd/mediaprobe "https://youtu.be/..." "https://vimeo.com/..."
+go run ./cmd/mediaprobe download "https://youtu.be/..." "137" 5s
+```
+
+### Compatibilidade
+
+`POST /v1/downloads` continua aceitando `{type, url}` e restrito ao YouTube, como
+sempre foi — mas agora **delega** ao mesmo caminho do downloader
+multiplataforma, em vez de manter uma segunda implementação.
+
+## 🛠️ Painel de administração
+
+O Super Admin tem uma área própria em `/admin`, com quatro telas:
+
+| Tela | O que faz |
+|---|---|
+| **Dashboard** | Downloads por período, volume transferido, armazenamento e totais da plataforma |
+| **Usuários** | Listagem paginada com busca e filtros; criar, editar, bloquear, remover e redefinir senha |
+| **Downloads** | Histórico global, filtrável por usuário, status e texto; remoção com o arquivo saindo do bucket |
+| **YouTube** | Contas gerenciadas usadas pelo downloader (seção acima) |
+
+### Períodos e gráficos
+
+Hoje, ontem, 7, 15, 30, 90 dias, 12 meses e intervalo personalizado. A
+granularidade é derivada do tamanho do intervalo — hora, dia, semana ou mês —
+porque 90 dias em barras de hora dariam 2160 pontos e um gráfico ilegível.
+
+Os baldes são truncados no fuso **America/Sao_Paulo**, o mesmo do limite diário.
+Em UTC o "dia" do gráfico começaria às 21h do dia anterior e não bateria com o
+contador que o usuário vê na tela.
+
+### Armazenamento
+
+A coluna `downloads.file_size_bytes` é gravada pelo worker logo após o upload,
+medida antes de o arquivo local ser apagado. Ela sustenta três números
+diferentes:
+
+- **Armazenado agora** — concluído, não removido e dentro da validade: é o que
+  ocupa espaço no R2 neste momento;
+- **Já liberado** — expirado ou removido;
+- **Histórico total** — tudo que já passou pelo bucket.
+
+Varrer o bucket a cada carregamento do painel seria lento e cobrado por
+requisição; por isso a contabilidade vive no banco. Downloads anteriores a esta
+coluna aparecem com tamanho zero — o arquivo deles já expirou, e contá-los como
+armazenamento atual seria pior do que não contar.
+
+### Senhas
+
+Ao criar um usuário sem informar senha, o painel gera uma com `crypto/rand` e a
+exibe **uma única vez**. O banco guarda apenas o hash, então não há como
+consultá-la depois — só gerar outra. O mesmo vale para "Gerar nova senha" na
+edição.
+
+### Travas
+
+- O super admin **não tem teto** de downloads por dia nem de tamanho por plano.
+- Bloquear um usuário recusa o login na hora, sem emitir token.
+- Remover é lógico: o histórico de downloads é preservado, e a conta perde o
+  acesso imediatamente.
+- Não é possível remover a própria conta, nem rebaixar/bloquear o **último**
+  super admin ativo — isso trancaria todo mundo para fora do painel, e não há
+  tela para desfazer.
 
 ## 🔐 Contas do YouTube (painel de Super Admin)
 

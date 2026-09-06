@@ -11,6 +11,56 @@ import (
 )
 
 type Querier interface {
+	AdminCountDownloads(ctx context.Context, arg AdminCountDownloadsParams) (int64, error)
+	AdminCountSuperAdmins(ctx context.Context) (int64, error)
+	AdminCountUsers(ctx context.Context, arg AdminCountUsersParams) (int64, error)
+	AdminDownloadsByFormat(ctx context.Context, arg AdminDownloadsByFormatParams) ([]AdminDownloadsByFormatRow, error)
+	// ---------------------------------------------------------------------------
+	// Métricas
+	// ---------------------------------------------------------------------------
+	// Números do período escolhido. Um único SELECT em vez de seis: o painel abre
+	// com todos eles na tela ao mesmo tempo.
+	AdminDownloadsSummary(ctx context.Context, arg AdminDownloadsSummaryParams) (AdminDownloadsSummaryRow, error)
+	// Série temporal do gráfico. generate_series preenche os períodos sem download
+	// com zero: sem isso o gráfico une dois pontos distantes com uma reta e inventa
+	// movimento que não existiu.
+	//
+	// Os baldes são truncados NO FUSO DE SÃO PAULO, e não em UTC. É o mesmo corte
+	// usado pelo limite diário; em UTC, o "dia" do gráfico começaria às 21h do dia
+	// anterior e não bateria com o contador que o usuário vê.
+	AdminDownloadsTimeSeries(ctx context.Context, arg AdminDownloadsTimeSeriesParams) ([]AdminDownloadsTimeSeriesRow, error)
+	AdminGetUserDetail(ctx context.Context, id uuid.UUID) (AdminGetUserDetailRow, error)
+	// ---------------------------------------------------------------------------
+	// Downloads
+	// ---------------------------------------------------------------------------
+	AdminListDownloads(ctx context.Context, arg AdminListDownloadsParams) ([]AdminListDownloadsRow, error)
+	// Consultas exclusivas do painel de Super Admin.
+	//
+	// Todas ignoram registros removidos e, quando fazem contas de armazenamento,
+	// somam apenas o que ainda existe no bucket.
+	// ---------------------------------------------------------------------------
+	// Usuários
+	// ---------------------------------------------------------------------------
+	// Listagem paginada com busca por nome/e-mail e filtros opcionais. Os
+	// sqlc.narg vazios desativam o próprio filtro, o que evita uma consulta por
+	// combinação de filtros.
+	AdminListUsers(ctx context.Context, arg AdminListUsersParams) ([]AdminListUsersRow, error)
+	// Totais que não dependem do período escolhido.
+	AdminPlatformTotals(ctx context.Context) (AdminPlatformTotalsRow, error)
+	// Remoção lógica. O histórico de downloads é preservado de propósito: ele
+	// referencia users(id) e ainda responde pela contabilidade de armazenamento.
+	AdminSoftDeleteUser(ctx context.Context, id uuid.UUID) error
+	// Armazenamento. "Atual" é o que ainda ocupa espaço no bucket: concluído, não
+	// removido e dentro da validade. "Histórico" é tudo que já passou por lá.
+	AdminStorageSummary(ctx context.Context) (AdminStorageSummaryRow, error)
+	AdminTopUsers(ctx context.Context, arg AdminTopUsersParams) ([]AdminTopUsersRow, error)
+	// Atualização vinda do painel. Diferente de UpdateUser, esta pode mexer no
+	// papel — e é por isso que ela é separada: a rota de perfil do usuário comum
+	// nunca deve conseguir se promover.
+	AdminUpdateUser(ctx context.Context, arg AdminUpdateUserParams) (User, error)
+	// Só cancela o que ainda não terminou: um download já concluído não pode voltar
+	// a CANCELED e sumir do histórico do usuário.
+	CancelDownload(ctx context.Context, arg CancelDownloadParams) (Download, error)
 	// Reivindica a conta autenticada usada há mais tempo e já registra o uso na
 	// mesma operação, de modo que o rodízio não dependa de um UPDATE posterior.
 	//
@@ -27,6 +77,7 @@ type Querier interface {
 	CountDownloadsToday(ctx context.Context, userID uuid.UUID) (int64, error)
 	CountYoutubeAccounts(ctx context.Context) (int64, error)
 	CreateDownload(ctx context.Context, arg CreateDownloadParams) (Download, error)
+	CreateMediaDownload(ctx context.Context, arg CreateMediaDownloadParams) (Download, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	CreateYoutubeAccount(ctx context.Context, arg CreateYoutubeAccountParams) (YoutubeAccount, error)
 	DeleteDownload(ctx context.Context, id uuid.UUID) error
@@ -34,14 +85,24 @@ type Querier interface {
 	GetDownloadByID(ctx context.Context, id uuid.UUID) (Download, error)
 	GetDownloadsByUser(ctx context.Context, arg GetDownloadsByUserParams) ([]Download, error)
 	GetDownloadsExpired(ctx context.Context) ([]Download, error)
+	// O filtro por deleted_at é o que faz a remoção no painel valer também para o
+	// login: sem ele, um usuário removido continuaria autenticando normalmente.
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
 	GetUsers(ctx context.Context) ([]User, error)
 	GetYoutubeAccountByID(ctx context.Context, id uuid.UUID) (YoutubeAccount, error)
 	GetYoutubeAccounts(ctx context.Context) ([]YoutubeAccount, error)
 	GetYoutubeAccountsForHealthCheck(ctx context.Context) ([]YoutubeAccount, error)
+	MarkDownloadFinished(ctx context.Context, arg MarkDownloadFinishedParams) error
+	MarkDownloadStarted(ctx context.Context, id uuid.UUID) error
+	// Gravado pelo worker logo após o upload. É o que sustenta as métricas de
+	// armazenamento do painel: sem isto, o total do storage fica zerado para sempre.
+	SetDownloadFileSize(ctx context.Context, arg SetDownloadFileSizeParams) error
 	SetUserRoleByEmail(ctx context.Context, arg SetUserRoleByEmailParams) (User, error)
 	UpdateDownload(ctx context.Context, arg UpdateDownloadParams) error
+	// Gravado durante o download. Escreve pouco de propósito: o tempo real vai por
+	// SSE, e isto é só o último estado conhecido para a tela reabrir no meio.
+	UpdateDownloadProgress(ctx context.Context, arg UpdateDownloadProgressParams) error
 	UpdateDownloadStatus(ctx context.Context, arg UpdateDownloadStatusParams) error
 	UpdateUser(ctx context.Context, arg UpdateUserParams) error
 	UpdateUserLoginInfo(ctx context.Context, id uuid.UUID) error

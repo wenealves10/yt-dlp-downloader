@@ -30,6 +30,13 @@ func limitMiddleware(store db.Store) gin.HandlerFunc {
 			return
 		}
 
+		// O super admin opera a plataforma: um teto diário nele atrapalharia
+		// justamente quem precisa reproduzir o problema de um cliente.
+		if user.Role == db.CoreUserRoleSuperAdmin {
+			ctx.Next()
+			return
+		}
+
 		// Contar quantos downloads o usuário já fez hoje
 		count, err := store.CountDownloadsToday(ctx, user.ID)
 		if err != nil {

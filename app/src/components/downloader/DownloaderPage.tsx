@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from "react";
-import { Link, Clapperboard, Music, Download, Loader } from "lucide-react";
 import { UserMenu } from "../user/UserMenu";
 import { DownloadCard } from "./DownloadCard";
 import { useAuth } from "../../hooks/useAuth";
@@ -7,12 +6,13 @@ import { useQuery } from "@tanstack/react-query";
 import { getData, startFileDownload } from "../../api/getData";
 import { bucketHost } from "../../constants/config";
 import { DownloadCounter } from "./DownloadCounter";
-import {
-  useDeleteDownloadMutation,
-  useDownloadMutation,
-} from "../../hooks/useDownloadMutation";
+import { useDeleteDownloadMutation } from "../../hooks/useDownloadMutation";
 import { useDownloads } from "../../hooks/useDownload";
+import { MediaResolver } from "./MediaResolver";
+import { resolverThumbnail } from "./format";
+import { cancelDownload } from "../../api/mediaApi";
 import type { Download as DownloadType } from "../../interface/Download";
+import type { DownloadProgress } from "../../interface/Media";
 const apiUrl = import.meta.env.VITE_API_URL;
 
 interface Job {
@@ -28,6 +28,12 @@ interface Job {
   tweet?: string;
   isSummarizing?: boolean;
   isGeneratingTweet?: boolean;
+  platform?: string;
+  uploader?: string;
+  quality?: string;
+  sizeBytes?: number;
+  progress?: DownloadProgress;
+  errorMessage?: string;
 }
 
 function convertStatus(apiStatus: string): Job["status"] {
@@ -42,6 +48,8 @@ function convertStatus(apiStatus: string): Job["status"] {
       return "expired";
     case "FAILED":
       return "error";
+    case "CANCELED":
+      return "expired";
     default:
       return "queue";
   }
@@ -49,15 +57,14 @@ function convertStatus(apiStatus: string): Job["status"] {
 
 export const DownloaderPage: React.FC = () => {
   const { user, logout, token } = useAuth();
-  const [url, setUrl] = useState("");
-  const [format, setFormat] = useState("video");
   const [jobs, setJobs] = useState<Job[]>([]);
   const [error, setError] = useState("");
   const [downloadingJobID, setDownloadingJobID] = useState<string | null>(null);
   const [page] = useState(1);
   const [perPage] = useState(10);
-  const { remaining, refetch } = useDownloads();
+  const { remaining, unlimited, refetch } = useDownloads();
   const deleteDownload = useDeleteDownloadMutation();
+  const semSaldo = !unlimited && remaining === 0;
 
   const downloadsQuery = useQuery({
     queryKey: ["downloads", page, perPage],
@@ -66,7 +73,6 @@ export const DownloaderPage: React.FC = () => {
     enabled: !!token,
   });
 
-  const downloadMutation = useDownloadMutation();
 
   useEffect(() => {
     if (downloadsQuery.data?.downloads) {
@@ -76,13 +82,31 @@ export const DownloaderPage: React.FC = () => {
         status: convertStatus(item.status),
         durationSeconds: item.duration_seconds,
         format: item.format.toLowerCase(),
-        thumbnail: item.thumbnail_url?.includes("http")
-          ? ""
-          : `${bucketHost}/${item.thumbnail_url}`,
+        thumbnail: resolverThumbnail(item.thumbnail_url, bucketHost),
         completedAt: new Date(item.created_at).getTime(),
         expiresAt: item.expires_at,
+        platform: item.platform_label,
+        uploader: item.uploader,
+        quality: item.quality_label,
+        sizeBytes: item.file_size_bytes,
+        errorMessage: item.error_message,
       }));
-      setJobs(mapped);
+
+      // O histórico não traz o progresso ao vivo — ele chega por SSE. Trocar a
+      // lista inteira aqui apagaria a barra de um download em andamento toda
+      // vez que a consulta revalidasse.
+      setJobs((anteriores) => {
+        const progressoAtual = new Map(
+          anteriores
+            .filter((job) => job.progress)
+            .map((job) => [job.id, job.progress])
+        );
+        return mapped.map((job) =>
+          progressoAtual.has(job.id)
+            ? { ...job, progress: progressoAtual.get(job.id) }
+            : job
+        );
+      });
     }
   }, [downloadsQuery.data]);
 
@@ -96,14 +120,20 @@ export const DownloaderPage: React.FC = () => {
         const existingIndex = prev.findIndex((job) => job.id === data.id);
         if (existingIndex !== -1) {
           const updatedJobs = [...prev];
+          const anterior = updatedJobs[existingIndex];
           updatedJobs[existingIndex] = {
-            ...updatedJobs[existingIndex],
+            ...anterior,
             ...data,
             status: convertStatus(data.status),
-            thumbnail: data?.thumbnail_url
-              ? `${bucketHost}/${data.thumbnail_url}`
-              : updatedJobs[existingIndex].thumbnail,
-            expiresAt: data.expires_at || updatedJobs[existingIndex].expiresAt,
+            thumbnail:
+              resolverThumbnail(data.thumbnail_url, bucketHost) ||
+              anterior.thumbnail,
+            expiresAt: data.expires_at || anterior.expiresAt,
+            platform: data.platform_label || data.platform || anterior.platform,
+            // O evento de conclusão não traz progresso; manter o último
+            // conhecido evita a barra sumir e voltar durante a transição.
+            progress: data.progress ?? anterior.progress,
+            errorMessage: data.error_message || anterior.errorMessage,
           };
           return updatedJobs;
         }
@@ -121,29 +151,14 @@ export const DownloaderPage: React.FC = () => {
     };
   }, []);
 
-  const handleDownload = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!url.includes("youtube.com/") && !url.includes("youtu.be/")) {
-      setError("Link inválido.");
-      return;
-    }
+  const handleCancel = async (id: string) => {
+    if (!token) return;
     setError("");
-    downloadMutation.mutate(
-      { url, type: format as "music" | "video" },
-      {
-        onSuccess: () => {
-          setUrl("");
-          downloadsQuery.refetch();
-          refetch();
-        },
-        onError: (error) => {
-          const errorMessage =
-            error instanceof Error ? error.message : "Erro ao baixar o vídeo.";
-          setError(errorMessage);
-        },
-      }
-    );
-    setUrl("");
+    try {
+      await cancelDownload(token)(id);
+    } catch (falha) {
+      setError(falha instanceof Error ? falha.message : "Não foi possível cancelar.");
+    }
   };
 
   const handleRemoveJob = (id: string) => {
@@ -185,84 +200,21 @@ export const DownloaderPage: React.FC = () => {
           </div>
         </header>
 
-        <section className="bg-gray-800 p-6 rounded-xl shadow-2xl border border-gray-700">
-          <form onSubmit={handleDownload}>
-            <div className="relative mb-4">
-              <Link className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-500" />
-              <input
-                type="text"
-                value={url}
-                onChange={(e) => {
-                  setUrl(e.target.value);
-                  setError("");
-                }}
-                disabled={remaining === 0}
-                placeholder="Cole o link do YouTube aqui..."
-                className={`w-full bg-gray-900 border border-gray-600 rounded-lg py-3 pl-10 pr-4 focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all placeholder-gray-500 
-                    ${
-                      remaining === 0 ? "opacity-50 cursor-not-allowed" : ""
-                    }                  
-                  `}
-              />
-            </div>
-            {error && (
-              <p className="text-red-500 text-sm mb-4">
-                {error.split("\n").map((line, i) => (
-                  <span key={i}>
-                    {line}
-                    <br />
-                  </span>
-                ))}
-              </p>
-            )}
-            <div className="flex flex-col sm:flex-row items-center gap-4">
-              <div className="flex-grow w-full sm:w-auto flex items-stretch gap-2 p-1 bg-gray-900 rounded-lg">
-                <button
-                  type="button"
-                  onClick={() => setFormat("video")}
-                  className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-md transition-colors text-sm font-medium ${
-                    format === "video"
-                      ? "bg-red-600 text-white"
-                      : "hover:bg-gray-700"
-                  }`}
-                >
-                  <Clapperboard size={16} />
-                  MP4
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setFormat("music")}
-                  className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-md transition-colors text-sm font-medium ${
-                    format === "music"
-                      ? "bg-red-600 text-white"
-                      : "hover:bg-gray-700"
-                  }`}
-                >
-                  <Music size={16} />
-                  MP3
-                </button>
-              </div>
-              <button
-                type="submit"
-                disabled={downloadMutation.isPending || !url}
-                className="w-full sm:w-auto flex-shrink-0 flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 text-white font-bold py-2.5 px-6 rounded-lg transition-all disabled:bg-red-800 disabled:cursor-not-allowed"
-              >
-                {downloadMutation.isPending ? (
-                  <>
-                    <Loader className="animate-spin" size={20} /> Processando...
-                  </>
-                ) : (
-                  <>
-                    <Download size={20} /> Baixar
-                  </>
-                )}
-              </button>
-            </div>
-          </form>
-          <p className="text-xs text-center text-gray-500 mt-4">
-            Arquivos disponíveis por 24h.
-          </p>
-        </section>
+        <MediaResolver
+          bloqueado={semSaldo}
+          aoCriar={() => {
+            downloadsQuery.refetch();
+            refetch();
+          }}
+        />
+
+        {error && (
+          <p className="mt-4 text-sm text-red-400">{error}</p>
+        )}
+
+        <p className="text-xs text-center text-gray-500 mt-4">
+          Arquivos disponíveis por 24h.
+        </p>
 
         {jobs.length > 0 && (
           <section className="mt-8">
@@ -276,6 +228,7 @@ export const DownloaderPage: React.FC = () => {
                   job={job}
                   onDownload={handleFileDownload}
                   onRemove={handleRemoveJob}
+                  onCancel={handleCancel}
                   isDownloading={downloadingJobID === job.id}
                 />
               ))}

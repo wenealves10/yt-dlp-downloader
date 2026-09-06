@@ -57,6 +57,11 @@ x-banco: &banco
 # O downloader e o navegador remoto saem pelo mesmo caminho de rede: a sessão é
 # criada e usada pelo mesmo IP.
 x-downloader: &downloader
+  # O diretório de trabalho fica no volume, e não na camada de escrita do
+  # container: um vídeo grande enche a camada e o Docker não avisa.
+  MEDIA_WORK_DIR: "/app/uploads/tmp"
+  MEDIA_METADATA_TIMEOUT: "45s"
+  MEDIA_DOWNLOAD_TIMEOUT: "2h"
   PROXY_ENABLED: "${PROXY_ENABLED}"
   PROXY_URL: "${PROXY_URL}"
   YOUTUBE_DL_FILE_COOKIES: "${YOUTUBE_DL_FILE_COOKIES}"

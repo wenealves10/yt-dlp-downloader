@@ -252,6 +252,19 @@ type Download struct {
 	ErrorMessage    pgtype.Text        `json:"error_message"`
 	CreatedAt       *time.Time         `json:"created_at"`
 	DeletedAt       pgtype.Timestamptz `json:"deleted_at"`
+	FileSizeBytes   int64              `json:"file_size_bytes"`
+	Platform        string             `json:"platform"`
+	Provider        pgtype.Text        `json:"provider"`
+	FormatID        pgtype.Text        `json:"format_id"`
+	QualityLabel    pgtype.Text        `json:"quality_label"`
+	ProgressPercent pgtype.Numeric     `json:"progress_percent"`
+	DownloadedBytes int64              `json:"downloaded_bytes"`
+	TotalBytes      int64              `json:"total_bytes"`
+	SpeedBps        int64              `json:"speed_bps"`
+	EtaSeconds      int32              `json:"eta_seconds"`
+	StartedAt       pgtype.Timestamptz `json:"started_at"`
+	FinishedAt      pgtype.Timestamptz `json:"finished_at"`
+	Uploader        pgtype.Text        `json:"uploader"`
 }
 
 type User struct {
@@ -269,6 +282,7 @@ type User struct {
 	CreatedAt         *time.Time         `json:"created_at"`
 	UpdatedAt         *time.Time         `json:"updated_at"`
 	Role              CoreUserRole       `json:"role"`
+	DeletedAt         pgtype.Timestamptz `json:"deleted_at"`
 }
 
 type YoutubeAccount struct {

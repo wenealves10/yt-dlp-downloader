@@ -51,6 +51,14 @@ func (p *JobUploadMusic) ProcessTask(ctx context.Context, task *asynq.Task) erro
 		return fmt.Errorf("failed to check download existence: %v: %w", err, asynq.SkipRetry)
 	}
 
+	// Medido antes do upload, porque o arquivo local é apagado logo em
+	// seguida. É o que alimenta as métricas de armazenamento do painel; falhar
+	// aqui não pode derrubar um download já concluído.
+	fileSize, err := utils.FileSize(payload.MusicPath)
+	if err != nil {
+		log.Printf("failed to read file size for download %s: %v", payload.DownloadID, err)
+	}
+
 	if err := p.r2Storage.UploadFile(ctx, payload.MusicPath, musicPathDest); err != nil {
 		return fmt.Errorf("failed to upload music file: %v: %w", err, asynq.SkipRetry)
 	}
@@ -71,13 +79,22 @@ func (p *JobUploadMusic) ProcessTask(ctx context.Context, task *asynq.Task) erro
 		return fmt.Errorf("failed to update download: %v: %w", err, asynq.SkipRetry)
 	}
 
+	if fileSize > 0 {
+		if err := p.store.SetDownloadFileSize(ctx, db.SetDownloadFileSizeParams{
+			ID:            downloadID,
+			FileSizeBytes: fileSize,
+		}); err != nil {
+			log.Printf("failed to record file size for download %s: %v", payload.DownloadID, err)
+		}
+	}
+
 	if err := p.rdStream.Publish(ctx, stream.StreamName, stream.DownloadEvent{
 		ID:           payload.DownloadID,
 		UserID:       downloadExists.UserID.String(),
 		Status:       db.CoreDownloadStatusCOMPLETED,
 		FileUrl:      musicPathDest,
 		ThumbnailUrl: bannerPathDest,
-		ExpiresAt:    expiredAt,
+		ExpiresAt:    &expiredAt,
 	}); err != nil {
 		log.Println("failed to publish download event:", err)
 	}

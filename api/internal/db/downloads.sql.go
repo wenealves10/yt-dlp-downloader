@@ -12,6 +12,57 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const cancelDownload = `-- name: CancelDownload :one
+UPDATE downloads
+SET status = 'CANCELED', finished_at = now()
+WHERE id = $1
+  AND user_id = $2
+  AND deleted_at IS NULL
+  AND status IN ('PENDING', 'PROCESSING', 'RETRYING')
+RETURNING id, user_id, original_url, title, format, status, thumbnail_url, file_url, expires_at, duration_seconds, error_message, created_at, deleted_at, file_size_bytes, platform, provider, format_id, quality_label, progress_percent, downloaded_bytes, total_bytes, speed_bps, eta_seconds, started_at, finished_at, uploader
+`
+
+type CancelDownloadParams struct {
+	ID     uuid.UUID `json:"id"`
+	UserID uuid.UUID `json:"user_id"`
+}
+
+// Só cancela o que ainda não terminou: um download já concluído não pode voltar
+// a CANCELED e sumir do histórico do usuário.
+func (q *Queries) CancelDownload(ctx context.Context, arg CancelDownloadParams) (Download, error) {
+	row := q.db.QueryRow(ctx, cancelDownload, arg.ID, arg.UserID)
+	var i Download
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.OriginalUrl,
+		&i.Title,
+		&i.Format,
+		&i.Status,
+		&i.ThumbnailUrl,
+		&i.FileUrl,
+		&i.ExpiresAt,
+		&i.DurationSeconds,
+		&i.ErrorMessage,
+		&i.CreatedAt,
+		&i.DeletedAt,
+		&i.FileSizeBytes,
+		&i.Platform,
+		&i.Provider,
+		&i.FormatID,
+		&i.QualityLabel,
+		&i.ProgressPercent,
+		&i.DownloadedBytes,
+		&i.TotalBytes,
+		&i.SpeedBps,
+		&i.EtaSeconds,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.Uploader,
+	)
+	return i, err
+}
+
 const countDownloadsByUser = `-- name: CountDownloadsByUser :one
 SELECT COUNT(*) FROM downloads
 WHERE user_id = $1
@@ -32,7 +83,7 @@ INSERT INTO downloads (
 VALUES (
   $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
 )
-RETURNING id, user_id, original_url, title, format, status, thumbnail_url, file_url, expires_at, duration_seconds, error_message, created_at, deleted_at
+RETURNING id, user_id, original_url, title, format, status, thumbnail_url, file_url, expires_at, duration_seconds, error_message, created_at, deleted_at, file_size_bytes, platform, provider, format_id, quality_label, progress_percent, downloaded_bytes, total_bytes, speed_bps, eta_seconds, started_at, finished_at, uploader
 `
 
 type CreateDownloadParams struct {
@@ -78,6 +129,97 @@ func (q *Queries) CreateDownload(ctx context.Context, arg CreateDownloadParams) 
 		&i.ErrorMessage,
 		&i.CreatedAt,
 		&i.DeletedAt,
+		&i.FileSizeBytes,
+		&i.Platform,
+		&i.Provider,
+		&i.FormatID,
+		&i.QualityLabel,
+		&i.ProgressPercent,
+		&i.DownloadedBytes,
+		&i.TotalBytes,
+		&i.SpeedBps,
+		&i.EtaSeconds,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.Uploader,
+	)
+	return i, err
+}
+
+const createMediaDownload = `-- name: CreateMediaDownload :one
+INSERT INTO downloads (
+  id, user_id, original_url, title, format, status,
+  thumbnail_url, duration_seconds, platform, provider,
+  format_id, quality_label, uploader, total_bytes
+)
+VALUES (
+  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
+)
+RETURNING id, user_id, original_url, title, format, status, thumbnail_url, file_url, expires_at, duration_seconds, error_message, created_at, deleted_at, file_size_bytes, platform, provider, format_id, quality_label, progress_percent, downloaded_bytes, total_bytes, speed_bps, eta_seconds, started_at, finished_at, uploader
+`
+
+type CreateMediaDownloadParams struct {
+	ID              uuid.UUID          `json:"id"`
+	UserID          uuid.UUID          `json:"user_id"`
+	OriginalUrl     string             `json:"original_url"`
+	Title           string             `json:"title"`
+	Format          CoreFormatType     `json:"format"`
+	Status          CoreDownloadStatus `json:"status"`
+	ThumbnailUrl    pgtype.Text        `json:"thumbnail_url"`
+	DurationSeconds pgtype.Int4        `json:"duration_seconds"`
+	Platform        string             `json:"platform"`
+	Provider        pgtype.Text        `json:"provider"`
+	FormatID        pgtype.Text        `json:"format_id"`
+	QualityLabel    pgtype.Text        `json:"quality_label"`
+	Uploader        pgtype.Text        `json:"uploader"`
+	TotalBytes      int64              `json:"total_bytes"`
+}
+
+func (q *Queries) CreateMediaDownload(ctx context.Context, arg CreateMediaDownloadParams) (Download, error) {
+	row := q.db.QueryRow(ctx, createMediaDownload,
+		arg.ID,
+		arg.UserID,
+		arg.OriginalUrl,
+		arg.Title,
+		arg.Format,
+		arg.Status,
+		arg.ThumbnailUrl,
+		arg.DurationSeconds,
+		arg.Platform,
+		arg.Provider,
+		arg.FormatID,
+		arg.QualityLabel,
+		arg.Uploader,
+		arg.TotalBytes,
+	)
+	var i Download
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.OriginalUrl,
+		&i.Title,
+		&i.Format,
+		&i.Status,
+		&i.ThumbnailUrl,
+		&i.FileUrl,
+		&i.ExpiresAt,
+		&i.DurationSeconds,
+		&i.ErrorMessage,
+		&i.CreatedAt,
+		&i.DeletedAt,
+		&i.FileSizeBytes,
+		&i.Platform,
+		&i.Provider,
+		&i.FormatID,
+		&i.QualityLabel,
+		&i.ProgressPercent,
+		&i.DownloadedBytes,
+		&i.TotalBytes,
+		&i.SpeedBps,
+		&i.EtaSeconds,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.Uploader,
 	)
 	return i, err
 }
@@ -94,7 +236,7 @@ func (q *Queries) DeleteDownload(ctx context.Context, id uuid.UUID) error {
 }
 
 const getDownloadByID = `-- name: GetDownloadByID :one
-SELECT id, user_id, original_url, title, format, status, thumbnail_url, file_url, expires_at, duration_seconds, error_message, created_at, deleted_at FROM downloads
+SELECT id, user_id, original_url, title, format, status, thumbnail_url, file_url, expires_at, duration_seconds, error_message, created_at, deleted_at, file_size_bytes, platform, provider, format_id, quality_label, progress_percent, downloaded_bytes, total_bytes, speed_bps, eta_seconds, started_at, finished_at, uploader FROM downloads
 WHERE id = $1
   AND deleted_at IS NULL
 `
@@ -116,12 +258,25 @@ func (q *Queries) GetDownloadByID(ctx context.Context, id uuid.UUID) (Download, 
 		&i.ErrorMessage,
 		&i.CreatedAt,
 		&i.DeletedAt,
+		&i.FileSizeBytes,
+		&i.Platform,
+		&i.Provider,
+		&i.FormatID,
+		&i.QualityLabel,
+		&i.ProgressPercent,
+		&i.DownloadedBytes,
+		&i.TotalBytes,
+		&i.SpeedBps,
+		&i.EtaSeconds,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.Uploader,
 	)
 	return i, err
 }
 
 const getDownloadsByUser = `-- name: GetDownloadsByUser :many
-SELECT id, user_id, original_url, title, format, status, thumbnail_url, file_url, expires_at, duration_seconds, error_message, created_at, deleted_at FROM downloads
+SELECT id, user_id, original_url, title, format, status, thumbnail_url, file_url, expires_at, duration_seconds, error_message, created_at, deleted_at, file_size_bytes, platform, provider, format_id, quality_label, progress_percent, downloaded_bytes, total_bytes, speed_bps, eta_seconds, started_at, finished_at, uploader FROM downloads
 WHERE user_id = $1 
   AND deleted_at IS NULL
 ORDER BY created_at DESC
@@ -157,6 +312,19 @@ func (q *Queries) GetDownloadsByUser(ctx context.Context, arg GetDownloadsByUser
 			&i.ErrorMessage,
 			&i.CreatedAt,
 			&i.DeletedAt,
+			&i.FileSizeBytes,
+			&i.Platform,
+			&i.Provider,
+			&i.FormatID,
+			&i.QualityLabel,
+			&i.ProgressPercent,
+			&i.DownloadedBytes,
+			&i.TotalBytes,
+			&i.SpeedBps,
+			&i.EtaSeconds,
+			&i.StartedAt,
+			&i.FinishedAt,
+			&i.Uploader,
 		); err != nil {
 			return nil, err
 		}
@@ -169,7 +337,7 @@ func (q *Queries) GetDownloadsByUser(ctx context.Context, arg GetDownloadsByUser
 }
 
 const getDownloadsExpired = `-- name: GetDownloadsExpired :many
-SELECT id, user_id, original_url, title, format, status, thumbnail_url, file_url, expires_at, duration_seconds, error_message, created_at, deleted_at
+SELECT id, user_id, original_url, title, format, status, thumbnail_url, file_url, expires_at, duration_seconds, error_message, created_at, deleted_at, file_size_bytes, platform, provider, format_id, quality_label, progress_percent, downloaded_bytes, total_bytes, speed_bps, eta_seconds, started_at, finished_at, uploader
 FROM downloads
 WHERE status = 'COMPLETED'
   AND deleted_at IS NULL
@@ -200,6 +368,19 @@ func (q *Queries) GetDownloadsExpired(ctx context.Context) ([]Download, error) {
 			&i.ErrorMessage,
 			&i.CreatedAt,
 			&i.DeletedAt,
+			&i.FileSizeBytes,
+			&i.Platform,
+			&i.Provider,
+			&i.FormatID,
+			&i.QualityLabel,
+			&i.ProgressPercent,
+			&i.DownloadedBytes,
+			&i.TotalBytes,
+			&i.SpeedBps,
+			&i.EtaSeconds,
+			&i.StartedAt,
+			&i.FinishedAt,
+			&i.Uploader,
 		); err != nil {
 			return nil, err
 		}
@@ -209,6 +390,52 @@ func (q *Queries) GetDownloadsExpired(ctx context.Context) ([]Download, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const markDownloadFinished = `-- name: MarkDownloadFinished :exec
+UPDATE downloads
+SET status = $2, error_message = $3, finished_at = now()
+WHERE id = $1
+`
+
+type MarkDownloadFinishedParams struct {
+	ID           uuid.UUID          `json:"id"`
+	Status       CoreDownloadStatus `json:"status"`
+	ErrorMessage pgtype.Text        `json:"error_message"`
+}
+
+func (q *Queries) MarkDownloadFinished(ctx context.Context, arg MarkDownloadFinishedParams) error {
+	_, err := q.db.Exec(ctx, markDownloadFinished, arg.ID, arg.Status, arg.ErrorMessage)
+	return err
+}
+
+const markDownloadStarted = `-- name: MarkDownloadStarted :exec
+UPDATE downloads
+SET status = 'PROCESSING', started_at = now(), error_message = NULL
+WHERE id = $1
+`
+
+func (q *Queries) MarkDownloadStarted(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, markDownloadStarted, id)
+	return err
+}
+
+const setDownloadFileSize = `-- name: SetDownloadFileSize :exec
+UPDATE downloads
+SET file_size_bytes = $2
+WHERE id = $1
+`
+
+type SetDownloadFileSizeParams struct {
+	ID            uuid.UUID `json:"id"`
+	FileSizeBytes int64     `json:"file_size_bytes"`
+}
+
+// Gravado pelo worker logo após o upload. É o que sustenta as métricas de
+// armazenamento do painel: sem isto, o total do storage fica zerado para sempre.
+func (q *Queries) SetDownloadFileSize(ctx context.Context, arg SetDownloadFileSizeParams) error {
+	_, err := q.db.Exec(ctx, setDownloadFileSize, arg.ID, arg.FileSizeBytes)
+	return err
 }
 
 const updateDownload = `-- name: UpdateDownload :exec
@@ -239,6 +466,40 @@ func (q *Queries) UpdateDownload(ctx context.Context, arg UpdateDownloadParams) 
 		arg.ThumbnailUrl,
 		arg.ExpiresAt,
 		arg.ErrorMessage,
+	)
+	return err
+}
+
+const updateDownloadProgress = `-- name: UpdateDownloadProgress :exec
+UPDATE downloads
+SET
+  progress_percent = $2,
+  downloaded_bytes = $3,
+  total_bytes = GREATEST(total_bytes, $4),
+  speed_bps = $5,
+  eta_seconds = $6
+WHERE id = $1
+`
+
+type UpdateDownloadProgressParams struct {
+	ID              uuid.UUID      `json:"id"`
+	ProgressPercent pgtype.Numeric `json:"progress_percent"`
+	DownloadedBytes int64          `json:"downloaded_bytes"`
+	TotalBytes      int64          `json:"total_bytes"`
+	SpeedBps        int64          `json:"speed_bps"`
+	EtaSeconds      int32          `json:"eta_seconds"`
+}
+
+// Gravado durante o download. Escreve pouco de propósito: o tempo real vai por
+// SSE, e isto é só o último estado conhecido para a tela reabrir no meio.
+func (q *Queries) UpdateDownloadProgress(ctx context.Context, arg UpdateDownloadProgressParams) error {
+	_, err := q.db.Exec(ctx, updateDownloadProgress,
+		arg.ID,
+		arg.ProgressPercent,
+		arg.DownloadedBytes,
+		arg.TotalBytes,
+		arg.SpeedBps,
+		arg.EtaSeconds,
 	)
 	return err
 }

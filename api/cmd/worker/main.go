@@ -19,6 +19,7 @@ import (
 	"github.com/wenealves10/yt-dlp-downloader/internal/jobs"
 	"github.com/wenealves10/yt-dlp-downloader/internal/libs/storage/r2"
 	"github.com/wenealves10/yt-dlp-downloader/internal/libs/stream"
+	"github.com/wenealves10/yt-dlp-downloader/internal/providers"
 	"github.com/wenealves10/yt-dlp-downloader/internal/queues"
 	"github.com/wenealves10/yt-dlp-downloader/internal/tasks"
 	"github.com/wenealves10/yt-dlp-downloader/internal/ytaccounts"
@@ -81,6 +82,7 @@ func main() {
 
 	browserClient := browser.NewClient(cg.BrowserServiceURL, cg.BrowserServiceToken, cg.BrowserServiceTimeout)
 	accountProvider := ytaccounts.NewManager(store, browserClient)
+	mediaRegistry := providers.Registry(cg)
 
 	srv := asynq.NewServer(
 		asynqRedisOpt,
@@ -94,9 +96,16 @@ func main() {
 				queues.TypeDownloadExpirationQueue: queues.QueueWeightFileExpiration,
 				queues.TypeDeleteDownloadQueue:     queues.QueueWeightDeleteDownload,
 				queues.TypeYoutubeHealthCheckQueue: queues.QueueWeightYoutubeHealth,
+				queues.TypeDownloadMediaQueue:      queues.QueueWeightDownloadMedia,
+				queues.TypeTempCleanupQueue:        queues.QueueWeightTempCleanup,
 			},
 		},
 	)
+
+	// Um container derrubado no meio de um download não roda a limpeza do job;
+	// varrer na subida é o que impede o disco encher com sobras de execuções
+	// anteriores.
+	jobs.LimparTemporariosOrfaos(cg.MediaWorkDir)
 
 	go startScheduledTasks(asynqRedisOpt, browserClient.Configured())
 
@@ -104,6 +113,11 @@ func main() {
 	defer asynqClient.Close()
 
 	mux := asynq.NewServeMux()
+	// O job unificado atende qualquer plataforma. Os dois específicos seguem
+	// registrados só para as tarefas que já estavam na fila quando esta versão
+	// subiu; downloads novos não passam mais por eles.
+	mux.Handle(tasks.TypeDownloadMedia, jobs.NewJobDownloadMedia(
+		asynqClient, store, rdStream, rdb, mediaRegistry, accountProvider, cg.MediaWorkDir))
 	mux.Handle(tasks.TypeDownloadVideo, jobs.NewJobDownloadVideo(asynqClient, store, rdStream, accountProvider))
 	mux.Handle(tasks.TypeDownloadMusic, jobs.NewJobDownloadMusic(asynqClient, store, rdStream, accountProvider))
 	mux.Handle(tasks.TypeUploadVideo, jobs.NewJobUploadVideo(asynqClient, r2Storage, store, rdStream))
@@ -111,6 +125,7 @@ func main() {
 	mux.Handle(tasks.TypeDeleteDownload, jobs.NewJobDeleteDownload(asynqClient, r2Storage, store))
 	mux.Handle(tasks.TypeDownloadExpiration, jobs.NewJobDownloadExpiration(asynqClient, store))
 	mux.Handle(tasks.TypeYoutubeHealthCheck, jobs.NewJobYoutubeHealthCheck(store, browserClient))
+	mux.Handle(tasks.TypeTempCleanup, jobs.NewJobTempCleanup(cg.MediaWorkDir))
 	log.Printf("Starting worker server on %s with a maximum of %d concurrent tasks", redisAddr, queues.WorkerConcurrency)
 
 	if err := srv.Run(mux); err != nil {
@@ -152,6 +167,14 @@ func startScheduledTasks(redisOpt asynq.RedisClientOpt, withYoutubeHealthCheck b
 			log.Fatal(err)
 		}
 		log.Println("🩺 Health check das contas do YouTube agendado...", "Entry ID:", healthEntryID)
+	}
+
+	limpezaTask, err := tasks.NewTempCleanupTask()
+	if err != nil {
+		log.Fatalf("failed to create temp cleanup task: %v", err)
+	}
+	if _, err := scheduler.Register("17 * * * *", limpezaTask, asynq.Queue(queues.TypeTempCleanupQueue)); err != nil {
+		log.Fatal(err)
 	}
 
 	log.Println("⏱️ Scheduler iniciado...", "Entry ID:", entryID)

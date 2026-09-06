@@ -18,6 +18,7 @@ import (
 	"github.com/wenealves10/yt-dlp-downloader/internal/db"
 	"github.com/wenealves10/yt-dlp-downloader/internal/libs/storage/r2"
 	"github.com/wenealves10/yt-dlp-downloader/internal/libs/stream"
+	"github.com/wenealves10/yt-dlp-downloader/internal/providers"
 	"github.com/wenealves10/yt-dlp-downloader/internal/server"
 	"github.com/wenealves10/yt-dlp-downloader/internal/ytaccounts"
 	"github.com/wenealves10/yt-dlp-downloader/pkg/sse"
@@ -100,7 +101,12 @@ func main() {
 	}
 	accountProvider := ytaccounts.NewManager(store, browserClient)
 
-	api, err := server.NewServer(cg, store, asynqClient, sseManager, r2Storage, rdb, browserClient, accountProvider)
+	// O registry é montado no mesmo lugar para API e worker; divergir aqui
+	// faria a tela resolver com uma configuração e o download usar outra.
+	mediaRegistry := providers.Registry(cg)
+
+	api, err := server.NewServer(cg, store, asynqClient, sseManager, r2Storage,
+		rdb, browserClient, accountProvider, mediaRegistry)
 	if err != nil {
 		log.Fatalf("cannot create server: %v", err)
 	}

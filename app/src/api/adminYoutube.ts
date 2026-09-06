@@ -12,14 +12,23 @@ async function request<T>(
   path: string,
   init?: RequestInit
 ): Promise<T> {
-  const res = await fetch(`${apiUrl}${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-      ...(init?.headers || {}),
-    },
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${apiUrl}${path}`, {
+      ...init,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+        ...(init?.headers || {}),
+      },
+    });
+  } catch {
+    // fetch só rejeita quando a requisição nem chegou ao servidor. O erro
+    // nativo é "Failed to fetch", que não diz nada a quem está usando o painel.
+    throw new Error(
+      "Não foi possível falar com o servidor. Verifique a conexão e tente de novo."
+    );
+  }
 
   if (!res.ok) {
     let message = "Não foi possível concluir a operação.";

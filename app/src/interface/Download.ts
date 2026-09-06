@@ -1,3 +1,5 @@
+import type { DownloadProgress } from "./Media";
+
 export interface Download {
   id: string;
   title: string;
@@ -16,6 +18,15 @@ export interface Download {
     | "EXPIRED"
     | "RETRYING";
   created_at: string; // ISO date string
+  platform?: string;
+  platform_label?: string;
+  provider?: string;
+  quality_label?: string;
+  uploader?: string;
+  file_size_bytes?: number;
+  error_message?: string;
+  // Só chega pelo evento SSE; o histórico devolve o último estado gravado.
+  progress?: DownloadProgress;
 }
 
 export interface DownloadsResponse {
@@ -31,4 +42,7 @@ export interface DailyDownloadsResponse {
   daily_downloads: number;
   daily_limit: number;
   remaining: number;
+  // Super admin não tem teto: sem esta flag, remaining=0 travaria o campo de
+  // URL logo no primeiro download.
+  unlimited: boolean;
 }

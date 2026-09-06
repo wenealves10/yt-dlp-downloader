@@ -10,8 +10,9 @@ interface AdminHeaderProps {
   backLabel?: string;
 }
 
-// Cabeçalho comum das telas administrativas, no mesmo padrão visual do painel
-// de downloads.
+// Cabeçalho enxuto, usado apenas pela tela do navegador remoto: ali a navegação
+// completa do painel competiria com a janela do Chrome. As demais telas
+// administrativas usam o AdminShell.
 export const AdminHeader: React.FC<AdminHeaderProps> = ({
   breadcrumb,
   backTo = "/dashboard",

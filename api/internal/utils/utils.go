@@ -74,3 +74,14 @@ func GetCurrentTime() *time.Time {
 	currentTime := time.Now()
 	return &currentTime
 }
+
+// FileSize devolve o tamanho do arquivo em bytes. Um erro aqui não deve
+// derrubar o download: quem chama registra 0 e segue, porque perder a métrica é
+// menos grave do que perder o arquivo que o usuário já esperou.
+func FileSize(path string) (int64, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return 0, err
+	}
+	return info.Size(), nil
+}

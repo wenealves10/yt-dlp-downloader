@@ -68,6 +68,14 @@ type Config struct {
 	// apenas para o bootstrap do primeiro administrador.
 	SuperAdminEmail string `mapstructure:"SUPER_ADMIN_EMAIL"`
 
+	// Mecanismo de download multiplataforma. Trocar a versão do yt-dlp ou o
+	// caminho dos binários é configuração, não mudança de código.
+	YtDlpBinary          string        `mapstructure:"YTDLP_BINARY"`
+	FFmpegBinary         string        `mapstructure:"FFMPEG_BINARY"`
+	MediaMetadataTimeout time.Duration `mapstructure:"MEDIA_METADATA_TIMEOUT"`
+	MediaDownloadTimeout time.Duration `mapstructure:"MEDIA_DOWNLOAD_TIMEOUT"`
+	MediaWorkDir         string        `mapstructure:"MEDIA_WORK_DIR"`
+
 	// Configuração exclusiva do serviço de navegador.
 	BrowserListenAddress string        `mapstructure:"BROWSER_LISTEN_ADDRESS"`
 	BrowserProfilesDir   string        `mapstructure:"BROWSER_PROFILES_DIR"`

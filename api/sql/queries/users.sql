@@ -9,13 +9,22 @@ RETURNING *;
 
 -- name: GetUsers :many
 SELECT * FROM users
+WHERE deleted_at IS NULL
 ORDER BY created_at DESC;
 
+-- O filtro por deleted_at é o que faz a remoção no painel valer também para o
+-- login: sem ele, um usuário removido continuaria autenticando normalmente.
 -- name: GetUserByEmail :one
-SELECT * FROM users WHERE email = $1 LIMIT 1;
+SELECT * FROM users
+WHERE email = $1
+  AND deleted_at IS NULL
+LIMIT 1;
 
 -- name: GetUserByID :one
-SELECT * FROM users WHERE id = $1 LIMIT 1;
+SELECT * FROM users
+WHERE id = $1
+  AND deleted_at IS NULL
+LIMIT 1;
 
 -- name: UpdateUserLoginInfo :exec
 UPDATE users
@@ -42,4 +51,5 @@ RETURNING *;
 UPDATE users
 SET role = $2, updated_at = now()
 WHERE email = $1
+  AND deleted_at IS NULL
 RETURNING *;

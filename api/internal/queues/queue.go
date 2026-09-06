@@ -12,6 +12,8 @@ const (
 	TypeDownloadExpirationQueue = "download_expiration"
 	TypeDeleteDownloadQueue     = "delete_download"
 	TypeYoutubeHealthCheckQueue = "youtube_health_check"
+	TypeDownloadMediaQueue      = "download_media"
+	TypeTempCleanupQueue        = "temp_cleanup"
 )
 
 const (
@@ -32,4 +34,6 @@ const (
 	QueueWeightFileExpiration   = 1
 	QueueWeightDeleteDownload   = 10
 	QueueWeightYoutubeHealth    = 1
+	QueueWeightDownloadMedia    = 60
+	QueueWeightTempCleanup      = 1
 )

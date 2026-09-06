@@ -11,8 +11,9 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { AdminHeader } from "./AdminHeader";
+import { AdminShell } from "./AdminShell";
 import { AccountStatusBadge, BrowserStateBadge } from "./AccountStatusBadge";
+import { ConfirmDialog } from "../ui/ConfirmDialog";
 import {
   useCheckYoutubeAccount,
   useCloseYoutubeBrowser,
@@ -51,6 +52,8 @@ export const YoutubeAccountsPage: React.FC = () => {
   const [email, setEmail] = useState("");
   const [error, setError] = useState("");
   const [busyAccountID, setBusyAccountID] = useState<string | null>(null);
+  const [removendo, setRemovendo] = useState<YoutubeAccount | null>(null);
+  const [erroRemocao, setErroRemocao] = useState("");
 
   const accounts = data?.accounts ?? [];
   const browserAvailable = data?.browser_available ?? false;
@@ -85,53 +88,50 @@ export const YoutubeAccountsPage: React.FC = () => {
     });
   };
 
-  const handleDelete = (account: YoutubeAccount) => {
-    const confirmed = window.confirm(
-      `Remover a conta "${account.label}"? A sessão autenticada será apagada permanentemente.`
-    );
-    if (!confirmed) return;
-    runAction(account.id, deleteAccount);
+  const confirmarRemocao = () => {
+    if (!removendo) return;
+
+    setErroRemocao("");
+    deleteAccount.mutate(removendo.id, {
+      // Remover encerra o navegador e apaga o perfil do volume, então pode
+      // demorar alguns segundos; o diálogo espera em vez de fechar cedo.
+      onSuccess: () => setRemovendo(null),
+      onError: (mutationError: Error) => setErroRemocao(mutationError.message),
+    });
+  };
+
+  const cancelarRemocao = () => {
+    setRemovendo(null);
+    setErroRemocao("");
   };
 
   return (
-    <main className="bg-gray-900 text-white min-h-screen font-sans p-4 sm:p-6 lg:p-8">
-      <div className="max-w-6xl mx-auto">
-        <AdminHeader breadcrumb={["YouTube", "Contas"]} />
-
-        <section className="mb-6 flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-semibold text-gray-100">
-              Contas do YouTube
-            </h1>
-            <p className="text-sm text-gray-400 mt-1">
-              Sessões usadas pelo mecanismo de download. O login é feito
-              manualmente no navegador remoto; o sistema nunca guarda a senha da
-              conta.
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => refetch()}
-              disabled={isFetching}
-              className="flex items-center gap-2 px-4 py-2 text-sm rounded-lg border border-gray-700 text-gray-300 hover:bg-gray-800 transition-colors disabled:opacity-50"
-            >
-              <RefreshCw
-                size={16}
-                className={isFetching ? "animate-spin" : ""}
-              />
-              Atualizar
-            </button>
-            <button
-              type="button"
-              onClick={() => setFormOpen((open) => !open)}
-              className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white font-medium px-4 py-2 rounded-lg transition-colors"
-            >
-              <Plus size={16} />
-              Adicionar conta
-            </button>
-          </div>
-        </section>
+    <AdminShell
+      titulo="Contas do YouTube"
+      descricao="Sessões usadas pelo mecanismo de download. O login é feito manualmente no navegador remoto; o sistema nunca guarda a senha da conta."
+      acoes={
+        <>
+          <button
+            type="button"
+            onClick={() => refetch()}
+            disabled={isFetching}
+            className="flex items-center gap-2 px-4 py-2 text-sm rounded-lg border border-gray-700 text-gray-300 hover:bg-gray-800 transition-colors disabled:opacity-50"
+          >
+            <RefreshCw size={16} className={isFetching ? "animate-spin" : ""} />
+            Atualizar
+          </button>
+          <button
+            type="button"
+            onClick={() => setFormOpen((open) => !open)}
+            className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white font-medium px-4 py-2 rounded-lg transition-colors"
+          >
+            <Plus size={16} />
+            Adicionar conta
+          </button>
+        </>
+      }
+    >
+      <>
 
         {accounts.length > 0 && (
           <div className="mb-6 flex items-start gap-3 bg-gray-800 border border-gray-700 text-gray-300 rounded-lg p-4 text-sm">
@@ -398,7 +398,7 @@ export const YoutubeAccountsPage: React.FC = () => {
                   <button
                     type="button"
                     disabled={busy}
-                    onClick={() => handleDelete(account)}
+                    onClick={() => setRemovendo(account)}
                     className="flex items-center gap-2 text-red-400 hover:bg-gray-700 disabled:opacity-50 text-sm px-4 py-2 rounded-lg transition-colors ml-auto"
                   >
                     <Trash2 size={16} />
@@ -409,7 +409,18 @@ export const YoutubeAccountsPage: React.FC = () => {
             );
           })}
         </div>
-      </div>
-    </main>
+        <ConfirmDialog
+          open={removendo !== null}
+          titulo="Remover esta conta do YouTube?"
+          alvo={removendo?.label}
+          descricao="A sessão autenticada é apagada permanentemente. Para voltar a usar esta conta será preciso adicioná-la de novo e refazer o login."
+          confirmarLabel="Sim, remover"
+          processando={deleteAccount.isPending}
+          erro={erroRemocao}
+          onConfirm={confirmarRemocao}
+          onCancel={cancelarRemocao}
+        />
+      </>
+    </AdminShell>
   );
 };

@@ -8,6 +8,10 @@ import { RegistrationPage } from "./components/auth/RegistrationPage";
 import NotFound from "./components/notfound/NotFound";
 import SuperAdminRoute from "./components/auth/SuperAdminRoute";
 import { YoutubeAccountsPage } from "./components/admin/YoutubeAccountsPage";
+import { DashboardPage } from "./components/admin/DashboardPage";
+import { UsersPage } from "./components/admin/UsersPage";
+import { DownloadsPage } from "./components/admin/DownloadsPage";
+import { ProvidersPage } from "./components/admin/ProvidersPage";
 import Loading from "./components/loading/Loading";
 
 // O cliente noVNC pesa algumas centenas de kB e só interessa ao super admin.
@@ -37,6 +41,10 @@ export const App = () => {
       {/* Painel do super admin. A guarda aqui é conveniência de navegação: a
           autorização real é feita pela API em cada requisição. */}
       <Route element={<SuperAdminRoute />}>
+        <Route path="/admin" element={<DashboardPage />} />
+        <Route path="/admin/users" element={<UsersPage />} />
+        <Route path="/admin/downloads" element={<DownloadsPage />} />
+        <Route path="/admin/providers" element={<ProvidersPage />} />
         <Route
           path="/admin/youtube/accounts"
           element={<YoutubeAccountsPage />}

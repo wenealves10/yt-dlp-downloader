@@ -52,3 +52,54 @@ WHERE status = 'COMPLETED'
   AND deleted_at IS NULL
   AND expires_at IS NOT NULL
   AND expires_at <= NOW();
+
+-- Gravado pelo worker logo após o upload. É o que sustenta as métricas de
+-- armazenamento do painel: sem isto, o total do storage fica zerado para sempre.
+-- name: SetDownloadFileSize :exec
+UPDATE downloads
+SET file_size_bytes = $2
+WHERE id = $1;
+
+-- name: CreateMediaDownload :one
+INSERT INTO downloads (
+  id, user_id, original_url, title, format, status,
+  thumbnail_url, duration_seconds, platform, provider,
+  format_id, quality_label, uploader, total_bytes
+)
+VALUES (
+  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
+)
+RETURNING *;
+
+-- Gravado durante o download. Escreve pouco de propósito: o tempo real vai por
+-- SSE, e isto é só o último estado conhecido para a tela reabrir no meio.
+-- name: UpdateDownloadProgress :exec
+UPDATE downloads
+SET
+  progress_percent = $2,
+  downloaded_bytes = $3,
+  total_bytes = GREATEST(total_bytes, $4),
+  speed_bps = $5,
+  eta_seconds = $6
+WHERE id = $1;
+
+-- name: MarkDownloadStarted :exec
+UPDATE downloads
+SET status = 'PROCESSING', started_at = now(), error_message = NULL
+WHERE id = $1;
+
+-- name: MarkDownloadFinished :exec
+UPDATE downloads
+SET status = $2, error_message = sqlc.narg('error_message'), finished_at = now()
+WHERE id = $1;
+
+-- Só cancela o que ainda não terminou: um download já concluído não pode voltar
+-- a CANCELED e sumir do histórico do usuário.
+-- name: CancelDownload :one
+UPDATE downloads
+SET status = 'CANCELED', finished_at = now()
+WHERE id = $1
+  AND user_id = $2
+  AND deleted_at IS NULL
+  AND status IN ('PENDING', 'PROCESSING', 'RETRYING')
+RETURNING *;

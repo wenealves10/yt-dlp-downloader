@@ -16,22 +16,24 @@ import (
 	"github.com/wenealves10/yt-dlp-downloader/internal/configs"
 	"github.com/wenealves10/yt-dlp-downloader/internal/db"
 	"github.com/wenealves10/yt-dlp-downloader/internal/libs/storage"
+	"github.com/wenealves10/yt-dlp-downloader/internal/media"
 	"github.com/wenealves10/yt-dlp-downloader/internal/tokens"
 	"github.com/wenealves10/yt-dlp-downloader/internal/ytaccounts"
 	"github.com/wenealves10/yt-dlp-downloader/pkg/sse"
 )
 
 type Server struct {
-	config       configs.Config
-	store        db.Store
-	storage      storage.Storage
-	queueClient  *asynq.Client
-	sseManager   *sse.SSEManager
-	tokenCreator tokens.TokenCreator
-	redis        *redis.Client
-	browser      *browser.Client
-	accounts     ytaccounts.Provider
-	router       *gin.Engine
+	config        configs.Config
+	store         db.Store
+	storage       storage.Storage
+	queueClient   *asynq.Client
+	sseManager    *sse.SSEManager
+	tokenCreator  tokens.TokenCreator
+	redis         *redis.Client
+	browser       *browser.Client
+	mediaRegistry *media.Registry
+	accounts      ytaccounts.Provider
+	router        *gin.Engine
 }
 
 func NewServer(
@@ -43,6 +45,7 @@ func NewServer(
 	redisClient *redis.Client,
 	browserClient *browser.Client,
 	accounts ytaccounts.Provider,
+	mediaRegistry *media.Registry,
 ) (*Server, error) {
 
 	tokenCreator, err := tokens.NewPasetoTokenCreator(config.TokenPasetoKey)
@@ -51,15 +54,16 @@ func NewServer(
 	}
 
 	server := &Server{
-		store:        store,
-		tokenCreator: tokenCreator,
-		config:       config,
-		queueClient:  queueClient,
-		sseManager:   sseManager,
-		storage:      storage,
-		redis:        redisClient,
-		browser:      browserClient,
-		accounts:     accounts,
+		store:         store,
+		tokenCreator:  tokenCreator,
+		config:        config,
+		queueClient:   queueClient,
+		sseManager:    sseManager,
+		storage:       storage,
+		redis:         redisClient,
+		browser:       browserClient,
+		accounts:      accounts,
+		mediaRegistry: mediaRegistry,
 	}
 
 	if v, ok := binding.Validator.Engine().(*validator.Validate); ok {
@@ -136,11 +140,33 @@ func (server *Server) setupRouter() {
 	// without navigating to the R2 public URL.
 	groupV1.POST("/downloads/:id/file", formAuthMiddleware(server.tokenCreator, server.store), server.downloadFile)
 
+	// Download multiplataforma. A resolução não conta contra o limite diário:
+	// é consulta de metadados, não download.
+	authRoutes.POST("/media/resolve", server.resolveMedia)
+	authLimitedRoutes.POST("/media/downloads", server.createMediaDownload)
+	authRoutes.POST("/downloads/:id/cancel", server.cancelDownload)
+
 	// SSE route
 	groupV1.GET("/sse", server.sseHandler())
 
-	// Painel do super admin: contas do YouTube usadas pelo downloader.
+	// Painel do super admin.
 	adminRoutes := groupV1.Group("/admin", authMiddleware(server.tokenCreator, server.store), superAdminMiddleware())
+
+	// Métricas e histórico global.
+	adminRoutes.GET("/overview", server.overview)
+	adminRoutes.GET("/providers", server.listProviders)
+	adminRoutes.GET("/downloads", server.listDownloads)
+	adminRoutes.DELETE("/downloads/:id", server.deleteDownloadAdmin)
+
+	// Usuários.
+	adminRoutes.GET("/users", server.listUsers)
+	adminRoutes.POST("/users", server.createUser)
+	adminRoutes.GET("/users/:id", server.getUser)
+	adminRoutes.PATCH("/users/:id", server.updateUser)
+	adminRoutes.POST("/users/:id/password", server.resetUserPassword)
+	adminRoutes.DELETE("/users/:id", server.deleteUser)
+
+	// Contas do YouTube usadas pelo downloader.
 	adminRoutes.GET("/youtube/accounts", server.listYoutubeAccounts)
 	adminRoutes.POST("/youtube/accounts", server.createYoutubeAccount)
 	adminRoutes.GET("/youtube/accounts/:id", server.getYoutubeAccount)
