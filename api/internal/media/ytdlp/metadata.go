@@ -67,21 +67,7 @@ func (f formatoJSON) temAudio() bool {
 
 // Metadata resolve o conteúdo sem baixá-lo.
 func (p *Provider) Metadata(ctx context.Context, parsed *url.URL, opts media.MetadataOptions) (*media.Metadata, error) {
-	args := p.argsBase()
-	args = append(args,
-		"--dump-single-json",
-		"--no-playlist",
-		"--skip-download",
-	)
-
-	// Vimeo recusa a própria leitura de metadados sem sessão ("the web client
-	// only works when logged-in"); resolver sem os cookies falharia antes de o
-	// usuário chegar a escolher a qualidade.
-	if opts.CookieFile != "" {
-		args = append(args, "--cookies", opts.CookieFile)
-	}
-
-	args = append(args, "--", parsed.String())
+	args := p.argsMetadata(parsed, opts)
 
 	var bruto strings.Builder
 	stderr, err := p.runner.executar(ctx, args, func(linha string) {
@@ -169,6 +155,29 @@ func melhorQue(candidato, atual formatoJSON) bool {
 	}
 	// Empatando, o que já traz áudio junto evita a etapa de merge.
 	return candidato.temAudio() && !atual.temAudio()
+}
+
+// argsMetadata monta os argumentos da resolução. Separado da execução para
+// poder ser verificado sem subir processo: é aqui que o arquivo de sessão entra,
+// e passá-lo ou não muda o que a plataforma responde.
+func (p *Provider) argsMetadata(parsed *url.URL, opts media.MetadataOptions) []string {
+	args := p.argsBase()
+	args = append(args,
+		"--dump-single-json",
+		"--no-playlist",
+		"--skip-download",
+	)
+
+	// Vimeo recusa a própria leitura de metadados sem sessão ("the web client
+	// only works when logged-in"), e Reddit, X e Pinterest recusam o IP de
+	// datacenter. Resolver sem os cookies falha antes de o usuário chegar a
+	// escolher a qualidade.
+	if opts.CookieFile != "" {
+		args = append(args, "--cookies", opts.CookieFile)
+	}
+
+	// O "--" encerra as opções: o que vier depois é tratado como URL.
+	return append(args, "--", parsed.String())
 }
 
 // normalizarFormatos traduz o vocabulário do yt-dlp para o do domínio e reduz a

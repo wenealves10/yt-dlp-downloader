@@ -61,10 +61,17 @@ export interface DownloadProgress {
 // erasableSyntaxOnly, que proíbe parâmetros de propriedade no construtor.
 export class MediaError extends Error {
   readonly code: string;
+  // detail e session só chegam para o super admin: são o motivo técnico que a
+  // plataforma devolveu e se a conta gerenciada chegou a ser usada. Para o
+  // usuário comum a API não envia nenhum dos dois.
+  readonly detail?: string;
+  readonly session?: string;
 
-  constructor(message: string, code: string) {
+  constructor(message: string, code: string, detail?: string, session?: string) {
     super(message);
     this.name = "MediaError";
     this.code = code;
+    this.detail = detail;
+    this.session = session;
   }
 }

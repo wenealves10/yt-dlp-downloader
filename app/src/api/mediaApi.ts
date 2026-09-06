@@ -26,7 +26,9 @@ async function request<T>(token: string, path: string, body: unknown): Promise<T
   if (!res.ok) {
     throw new MediaError(
       dados?.error || dados?.message || "Não foi possível concluir a operação.",
-      dados?.code || "unknown"
+      dados?.code || "unknown",
+      dados?.detail,
+      dados?.session
     );
   }
   return dados as T;

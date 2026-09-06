@@ -2,6 +2,7 @@ package ytdlp
 
 import (
 	"context"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -384,4 +385,90 @@ func TestSeletorVideoSemFormatoEscolhido(t *testing.T) {
 func TestSeletorAudioDegrada(t *testing.T) {
 	require.Equal(t, "140/bestaudio/best", seletorAudio("140"))
 	require.Equal(t, "bestaudio/best", seletorAudio(""))
+}
+
+// Bloqueio de IP: a plataforma recusa ESTE servidor, não o conteúdo. Sem estes
+// padrões o caso caía no genérico "não foi possível concluir o download", que
+// não diz nada a quem opera — e é justamente o que acontece com IP de
+// datacenter em Reddit, X e Pinterest.
+func TestClassificarReconheceBloqueioDoServidor(t *testing.T) {
+	casos := map[string]string{
+		"403":     "ERROR: [Reddit] abc: Unable to download webpage: HTTP Error 403: Forbidden",
+		"401":     "ERROR: [generic] x: Unable to download webpage: HTTP Error 401: Unauthorized",
+		"blocked": "ERROR: [twitter] 1: Your IP address has been blocked",
+		"captcha": "ERROR: [pinterest] 1: Please solve the captcha to continue",
+		"5xx":     "ERROR: [Reddit] abc: Unable to download webpage: HTTP Error 503: Service Unavailable",
+		"negado":  "ERROR: [vimeo] 1: Access denied for this resource",
+	}
+
+	for nome, stderr := range casos {
+		err := classificar(nil, stderr)
+		require.ErrorIs(t, err, media.ErrBlocked, nome)
+		require.NotEmpty(t, media.Detail(err), "[%s] o detalhe técnico precisa sobreviver", nome)
+	}
+}
+
+// Falha de rede antes de qualquer resposta não é problema do conteúdo.
+func TestClassificarReconheceFalhaDeRede(t *testing.T) {
+	casos := []string{
+		"ERROR: unable to download webpage: <urlopen error [Errno 104] Connection reset by peer>",
+		"ERROR: unable to download webpage: Temporary failure in name resolution",
+		"ERROR: The read operation timed out",
+	}
+
+	for _, stderr := range casos {
+		require.ErrorIs(t, classificar(nil, stderr), media.ErrNetwork, stderr)
+	}
+}
+
+// A ordem da tabela importa: 429 e "login required" são causas mais
+// específicas para respostas da mesma família e não podem ser engolidas pelo
+// padrão de bloqueio.
+func TestClassificarNaoDeixaBloqueioEngolirCausasMaisEspecificas(t *testing.T) {
+	require.ErrorIs(t,
+		classificar(nil, "ERROR: [Reddit] abc: HTTP Error 429: Too Many Requests"),
+		media.ErrRateLimited)
+	require.ErrorIs(t,
+		classificar(nil, "ERROR: [vimeo] 1: The web client only works when logged-in. Use --cookies"),
+		media.ErrAuthRequired)
+}
+
+// O detalhe técnico existe para o log e para o super admin; nunca é a mensagem
+// que chega ao usuário comum.
+func TestDetalheNaoVazaParaAMensagemDoUsuario(t *testing.T) {
+	err := classificar(nil, "ERROR: [Reddit] abc: Unable to download webpage: HTTP Error 403: Forbidden")
+
+	require.Equal(t, media.ErrBlocked.Error(), media.UserMessage(err))
+	require.Contains(t, media.Detail(err), "403")
+	require.NotContains(t, media.UserMessage(err), "403")
+}
+
+// A sessão precisa chegar ao processo na RESOLUÇÃO, e não só no download:
+// Vimeo recusa a leitura de metadados sem login, e Reddit, X e Pinterest
+// recusam o IP de datacenter.
+func TestArgsMetadataPassaOArquivoDeSessao(t *testing.T) {
+	provider := New(Config{Binary: "yt-dlp"})
+	alvo, err := url.Parse("https://www.reddit.com/r/GTA6/s/abc")
+	require.NoError(t, err)
+
+	args := provider.argsMetadata(alvo, media.MetadataOptions{CookieFile: "/tmp/sessao/cookies.txt"})
+
+	require.Contains(t, args, "--cookies")
+	require.Contains(t, args, "/tmp/sessao/cookies.txt")
+
+	// A URL fecha a lista, logo depois do "--".
+	require.Equal(t, alvo.String(), args[len(args)-1])
+	require.Equal(t, "--", args[len(args)-2])
+}
+
+// Sem conta cadastrada a resolução segue anônima: a maioria do conteúdo público
+// não precisa de sessão, e exigir uma quebraria o que hoje funciona.
+func TestArgsMetadataSemSessaoNaoPassaCookies(t *testing.T) {
+	provider := New(Config{Binary: "yt-dlp"})
+	alvo, err := url.Parse("https://youtu.be/abc")
+	require.NoError(t, err)
+
+	args := provider.argsMetadata(alvo, media.MetadataOptions{})
+
+	require.NotContains(t, args, "--cookies")
 }

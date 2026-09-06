@@ -54,7 +54,23 @@ var padroesErro = []struct {
 
 	{[]string{"http error 429", "too many requests", "rate limit", "rate-limit"}, media.ErrRateLimited},
 
+	// A plataforma recusando ESTE servidor. Vem depois de 429 e da checagem de
+	// autenticação de propósito: as duas são causas mais específicas para a
+	// mesma família de respostas. Sem estes padrões o caso caía no genérico
+	// "não foi possível concluir o download", que não diz nada a quem opera —
+	// e é justamente o que acontece com IP de datacenter em Reddit, X e
+	// Pinterest, que atendem normalmente uma conexão residencial.
+	{[]string{"http error 403", "http error 401", "http error 451",
+		"blocked", "access denied", "forbidden", "captcha",
+		"unable to download webpage: http error 5"}, media.ErrBlocked},
+
 	{[]string{"unsupported url", "no suitable extractor", "is not a valid url"}, media.ErrUnsupportedPlatform},
+
+	// Falha de rede antes de qualquer resposta: não adianta culpar o conteúdo.
+	{[]string{"connection reset", "connection refused", "network is unreachable",
+		"temporary failure in name resolution", "name or service not known",
+		"read operation timed out", "connection timed out", "eof occurred",
+		"unable to connect to proxy"}, media.ErrNetwork},
 
 	{[]string{"no space left on device", "disk quota exceeded"}, media.ErrDownloadFailed},
 }

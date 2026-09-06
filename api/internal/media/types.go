@@ -220,6 +220,13 @@ var (
 	ErrLiveContent         = errors.New("transmissões ao vivo não podem ser baixadas")
 	ErrFormatUnavailable   = errors.New("o formato escolhido não está disponível")
 	ErrRateLimited         = errors.New("a plataforma pediu para tentar novamente mais tarde")
+	// ErrBlocked é a plataforma recusando o servidor, e não o conteúdo. É
+	// diferente de bloqueio regional e de limite de requisições: acontece com
+	// IP de datacenter mesmo em conteúdo público, e a saída é uma sessão
+	// autenticada — por isso a mensagem aponta para lá.
+	ErrBlocked = errors.New("a plataforma recusou o acesso a partir deste servidor")
+	// ErrNetwork é falha de rede antes de qualquer resposta da plataforma.
+	ErrNetwork             = errors.New("não foi possível alcançar a plataforma")
 	ErrTimeout             = errors.New("o download excedeu o tempo limite")
 	ErrCanceled            = errors.New("o download foi cancelado")
 	ErrProviderUnavailable = errors.New("o mecanismo de download está indisponível")
@@ -242,6 +249,18 @@ func (e *Error) Error() string {
 }
 
 func (e *Error) Unwrap() error { return e.Kind }
+
+// Detail devolve o detalhe técnico do erro, quando existe: é o resumo do stderr
+// que o provider capturou. NÃO é para o usuário comum — a mensagem dele é
+// UserMessage. Serve para o log e para o super admin, que precisa saber o que a
+// plataforma respondeu de fato, e não só que "não foi possível".
+func Detail(err error) string {
+	var domainErr *Error
+	if errors.As(err, &domainErr) {
+		return domainErr.Detail
+	}
+	return ""
+}
 
 // UserMessage é o texto seguro para a tela: sem caminho de arquivo, sem saída
 // de processo, sem nome de binário.
@@ -292,7 +311,8 @@ func UserMessage(err error) string {
 	for _, conhecido := range []error{
 		ErrInvalidURL, ErrUnsupportedPlatform, ErrContentUnavailable, ErrContentPrivate,
 		ErrAuthRequired, ErrGeoBlocked, ErrLiveContent, ErrFormatUnavailable,
-		ErrRateLimited, ErrTimeout, ErrCanceled, ErrProviderUnavailable, ErrDownloadFailed,
+		ErrRateLimited, ErrBlocked, ErrNetwork, ErrTimeout, ErrCanceled,
+		ErrProviderUnavailable, ErrDownloadFailed,
 	} {
 		if errors.Is(err, conhecido) {
 			return conhecido.Error()

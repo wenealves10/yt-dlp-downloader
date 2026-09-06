@@ -28,6 +28,13 @@ function dicaPorCodigo(codigo: string): string {
       return "A plataforma pediu uma pausa. Tente de novo em alguns minutos.";
     case "invalid_url":
       return "Cole o endereço completo do vídeo.";
+    case "blocked":
+      // O caso do IP de datacenter: a plataforma atende de uma conexão
+      // residencial e recusa a do servidor. Uma sessão autenticada é o que
+      // devolve o acesso.
+      return "A plataforma recusou o servidor. Uma conta autenticada dessa plataforma costuma resolver.";
+    case "network":
+      return "O servidor não conseguiu alcançar a plataforma. Tente de novo em instantes.";
     default:
       return "";
   }
@@ -41,13 +48,21 @@ export const MediaResolver: React.FC<Props> = ({ aoCriar, bloqueado }) => {
   const [criando, setCriando] = useState(false);
   const [midia, setMidia] = useState<ResolvedMedia | null>(null);
   const [formatoID, setFormatoID] = useState("");
-  const [erro, setErro] = useState<{ mensagem: string; dica: string } | null>(null);
+  const [erro, setErro] = useState<{
+    mensagem: string;
+    dica: string;
+    detalhe?: string;
+    sessao?: string;
+  } | null>(null);
 
   const tratarErro = (falha: unknown) => {
-    const codigo = falha instanceof MediaError ? falha.code : "unknown";
+    const midiaErro = falha instanceof MediaError ? falha : null;
     setErro({
       mensagem: falha instanceof Error ? falha.message : "Algo deu errado.",
-      dica: dicaPorCodigo(codigo),
+      dica: dicaPorCodigo(midiaErro?.code ?? "unknown"),
+      // Só chegam para o super admin; para os demais a API nem envia.
+      detalhe: midiaErro?.detail,
+      sessao: midiaErro?.session,
     });
   };
 
@@ -119,10 +134,20 @@ export const MediaResolver: React.FC<Props> = ({ aoCriar, bloqueado }) => {
         {erro && (
           <div className="mb-4 flex items-start gap-3 bg-red-900/30 border border-red-700 text-red-200 rounded-lg p-3 text-sm">
             <AlertTriangle size={18} className="mt-0.5 shrink-0" />
-            <span>
+            <span className="min-w-0">
               {erro.mensagem}
               {erro.dica && (
                 <span className="block text-red-300/70 mt-0.5">{erro.dica}</span>
+              )}
+              {erro.sessao && (
+                <span className="block text-red-300/60 mt-1.5 text-xs">
+                  Sessão: {erro.sessao}
+                </span>
+              )}
+              {erro.detalhe && (
+                <span className="block mt-1.5 text-xs font-mono text-red-300/60 break-words">
+                  {erro.detalhe}
+                </span>
               )}
             </span>
           </div>

@@ -71,7 +71,7 @@ func (s *Server) resolveMedia(ctx *gin.Context) {
 	// A sessão é emprestada já na resolução, e não só no download: o Vimeo
 	// recusa a leitura de metadados sem estar logado, então sem isto o usuário
 	// nem chegaria à tela de escolher a qualidade.
-	lease := s.sessaoPara(requestCtx, req.URL)
+	lease, sessao := s.sessaoPara(requestCtx, req.URL)
 	defer lease.Release()
 
 	metadata, normalizada, err := s.mediaRegistry.Metadata(requestCtx, req.URL, media.MetadataOptions{
@@ -80,11 +80,17 @@ func (s *Server) resolveMedia(ctx *gin.Context) {
 	if err != nil {
 		// O detalhe técnico fica no log; a tela recebe só a mensagem de
 		// domínio, sem saída de processo nem caminho de arquivo.
-		log.Printf("media: falha ao resolver plataforma=%s: %v", plataformaDe(err, req.URL), err)
-		ctx.JSON(statusPara(err), gin.H{
-			"error": media.UserMessage(err),
-			"code":  codigoErro(err),
-		})
+		log.Printf("media: falha ao resolver plataforma=%s sessao=%q: %v",
+			plataformaDe(err, req.URL), sessao.Descricao(), err)
+
+		corpo := respostaDeErro(ctx, err)
+		// A primeira pergunta quando falha numa plataforma que exige login é
+		// "a conta que eu cadastrei foi usada?". Sem responder isso, o
+		// administrador não tem por onde começar.
+		if user, ok := currentUser(ctx); ok && user.Role == db.CoreUserRoleSuperAdmin {
+			corpo["session"] = sessao.Descricao()
+		}
+		ctx.JSON(statusPara(err), corpo)
 		return
 	}
 
@@ -99,8 +105,8 @@ func (s *Server) resolveMedia(ctx *gin.Context) {
 
 	s.guardarMetadata(ctx.Request.Context(), normalizada, metadata)
 
-	log.Printf("media: resolvido plataforma=%s provider=%s formatos=%d",
-		metadata.Platform, metadata.Provider, len(formatos))
+	log.Printf("media: resolvido plataforma=%s provider=%s formatos=%d sessao=%q",
+		metadata.Platform, metadata.Provider, len(formatos), sessao.Descricao())
 
 	ctx.JSON(http.StatusOK, gin.H{
 		"url":            normalizada,
@@ -168,7 +174,7 @@ func (s *Server) criarDownloadMedia(ctx *gin.Context, req criarDownloadMediaRequ
 
 	normalizada, _, err := media.NormalizeURL(req.URL)
 	if err != nil {
-		ctx.JSON(statusPara(err), gin.H{"error": media.UserMessage(err), "code": codigoErro(err)})
+		ctx.JSON(statusPara(err), respostaDeErro(ctx, err))
 		return
 	}
 
@@ -180,7 +186,7 @@ func (s *Server) criarDownloadMedia(ctx *gin.Context, req criarDownloadMediaRequ
 		requestCtx, cancelar := context.WithTimeout(ctx.Request.Context(), resolveTimeout)
 		defer cancelar()
 
-		lease := s.sessaoPara(requestCtx, req.URL)
+		lease, _ := s.sessaoPara(requestCtx, req.URL)
 		defer lease.Release()
 
 		metadata, normalizada, err = s.mediaRegistry.Metadata(requestCtx, req.URL, media.MetadataOptions{
@@ -188,7 +194,7 @@ func (s *Server) criarDownloadMedia(ctx *gin.Context, req criarDownloadMediaRequ
 		})
 		if err != nil {
 			log.Printf("media: falha ao resolver na criação: %v", err)
-			ctx.JSON(statusPara(err), gin.H{"error": media.UserMessage(err), "code": codigoErro(err)})
+			ctx.JSON(statusPara(err), respostaDeErro(ctx, err))
 			return
 		}
 	}
@@ -357,29 +363,64 @@ func (s *Server) publicarCancelamento(ctx context.Context, download db.Download)
 	}
 }
 
+// sessaoUsada descreve o que aconteceu com a sessão gerenciada nesta resolução.
+// Existe porque "não foi possível" não diz se a conta que o administrador
+// cadastrou chegou a ser usada — e essa é a primeira pergunta quando algo falha
+// numa plataforma que exige login.
+type sessaoUsada struct {
+	Plataforma string
+	Necessaria bool
+	Conta      string
+	Motivo     string
+}
+
+// Descricao resume o estado para o painel, em uma linha.
+func (s sessaoUsada) Descricao() string {
+	switch {
+	case !s.Necessaria:
+		return "esta plataforma resolve sem conta"
+	case s.Conta != "":
+		return "usando a conta \"" + s.Conta + "\""
+	default:
+		return s.Motivo
+	}
+}
+
 // sessaoPara empresta a sessão gerenciada da plataforma da URL, quando existe.
 // A ausência não é erro: a maioria do conteúdo público resolve sem conta, e
 // exigir uma quebraria tudo que hoje funciona anônimo.
-func (s *Server) sessaoPara(ctx context.Context, bruta string) *ytaccounts.Lease {
-	if s.accounts == nil {
-		return nil
-	}
+func (s *Server) sessaoPara(ctx context.Context, bruta string) (*ytaccounts.Lease, sessaoUsada) {
 	_, parsed, err := media.NormalizeURL(bruta)
 	if err != nil {
-		return nil
+		return nil, sessaoUsada{}
 	}
 
 	plataforma := string(media.PlatformFor(parsed))
+	estado := sessaoUsada{Plataforma: plataforma}
 
 	// Só onde resolver anônimo comprovadamente falha. Buscar os cookies pode
 	// subir um Chrome headless sobre o perfil, e isso roda dentro da
 	// requisição de quem colou o link: pagar esse custo no YouTube, que
 	// resolve bem sem conta, seria trocar um problema por outro.
 	if !browser.PerfilDe(plataforma).MetadadosExigemSessao {
-		return nil
+		return nil, estado
+	}
+	estado.Necessaria = true
+
+	if s.accounts == nil {
+		estado.Motivo = "gerenciamento de contas indisponível neste ambiente"
+		return nil, estado
 	}
 
-	return ytaccounts.Acquire(ctx, s.accounts, plataforma)
+	lease := ytaccounts.Acquire(ctx, s.accounts, plataforma)
+	if lease == nil {
+		estado.Motivo = "nenhuma conta autenticada de " +
+			browser.PerfilDe(plataforma).Label + " disponível"
+		return nil, estado
+	}
+
+	estado.Conta = lease.Label
+	return lease, estado
 }
 
 // arquivoDeSessao evita espalhar checagem de nil por quem monta as opções.
@@ -487,6 +528,27 @@ func (s *Server) limiteExcedido(user db.User, tamanho int64) (gin.H, bool) {
 	return nil, false
 }
 
+// respostaDeErro monta o corpo de erro do download.
+//
+// O detalhe técnico (o resumo do stderr que o provider capturou) só é anexado
+// para o super admin. Para o usuário comum ele não significa nada e expõe
+// interno à toa; para quem opera, é a diferença entre "não foi possível
+// concluir o download" e saber que a plataforma respondeu 403 ao IP do
+// servidor. Sem isso, diagnosticar exige entrar no container e ler log.
+func respostaDeErro(ctx *gin.Context, err error) gin.H {
+	corpo := gin.H{
+		"error": media.UserMessage(err),
+		"code":  codigoErro(err),
+	}
+
+	if user, ok := currentUser(ctx); ok && user.Role == db.CoreUserRoleSuperAdmin {
+		if detalhe := media.Detail(err); detalhe != "" {
+			corpo["detail"] = detalhe
+		}
+	}
+	return corpo
+}
+
 // statusPara traduz o erro de domínio para o código HTTP correspondente.
 func statusPara(err error) int {
 	switch {
@@ -499,6 +561,10 @@ func statusPara(err error) int {
 		return http.StatusUnprocessableEntity
 	case errors.Is(err, media.ErrRateLimited):
 		return http.StatusTooManyRequests
+	case errors.Is(err, media.ErrBlocked):
+		return http.StatusForbidden
+	case errors.Is(err, media.ErrNetwork):
+		return http.StatusBadGateway
 	case errors.Is(err, media.ErrTimeout):
 		return http.StatusGatewayTimeout
 	case errors.Is(err, media.ErrProviderUnavailable):
@@ -530,6 +596,10 @@ func codigoErro(err error) string {
 		return "format_unavailable"
 	case errors.Is(err, media.ErrRateLimited):
 		return "rate_limited"
+	case errors.Is(err, media.ErrBlocked):
+		return "blocked"
+	case errors.Is(err, media.ErrNetwork):
+		return "network"
 	case errors.Is(err, media.ErrTimeout):
 		return "timeout"
 	case errors.Is(err, media.ErrProviderUnavailable):

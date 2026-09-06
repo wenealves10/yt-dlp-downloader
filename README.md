@@ -300,6 +300,31 @@ traduz para erros de domínio (`ErrContentPrivate`, `ErrGeoBlocked`,
 estável, e o detalhe técnico fica no log. Erros de conteúdo não são
 reenfileirados: um vídeo privado continuará privado na terceira tentativa.
 
+### Por que falhou
+
+A saída bruta do yt-dlp nunca chega ao usuário, mas esconder o motivo de **quem
+opera** transformava todo problema em adivinhação: um 403 da plataforma, um
+provider quebrado e um vídeo removido viravam a mesma frase na tela.
+
+Duas informações são anexadas à resposta de erro **apenas para o super admin**:
+
+- `detail` — o resumo do stderr (4 linhas, 500 caracteres, avisos removidos);
+- `session` — se a conta gerenciada chegou a ser usada, e qual. É a primeira
+  pergunta quando algo falha numa plataforma que exige login.
+
+Para qualquer outro papel a API não envia nenhum dos dois; a mensagem de domínio
+continua sendo tudo que o usuário comum vê.
+
+A tabela em `errors.go` cobre também o que antes caía no genérico:
+
+| Resposta da plataforma | Erro de domínio | O que significa |
+| --- | --- | --- |
+| 403, 401, 451, "blocked", captcha, 5xx | `ErrBlocked` | A plataforma recusou **este servidor**, não o conteúdo. Típico de IP de datacenter em Reddit, X e Pinterest, que atendem normalmente uma conexão residencial. A saída é uma conta autenticada |
+| connection reset/refused, DNS, timeout de leitura | `ErrNetwork` | Não chegou a haver resposta; não adianta culpar o conteúdo |
+
+A ordem da tabela importa: 429 e "login required" vêm antes, porque são causas
+mais específicas para respostas da mesma família.
+
 ### Diagnóstico
 
 `/admin/providers` mostra o estado do mecanismo — versão do yt-dlp, ffmpeg e
