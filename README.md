@@ -394,7 +394,37 @@ sondagem, uma imagem construída sem `curl-cffi` quebraria todo download dessas
 plataformas. O painel de providers mostra se está ativa.
 
 Se mesmo assim a plataforma recusar, o bloqueio é da faixa de IP e nenhuma
-mudança na aplicação resolve — aí a saída é a variável `PROXY_URL`.
+mudança na aplicação resolve. Aí entra o proxy — e ele é dividido em dois.
+
+### Proxy só na extração (`RESOLVE_PROXY_URL`)
+
+Um proxy residencial é vendido por **volume**, e as duas coisas que o yt-dlp faz
+têm ordens de grandeza diferentes:
+
+| Fase | O que trafega | Medido |
+| --- | --- | --- |
+| Extração de metadados | JSON com títulos, formatos e URLs | **~31 KB** |
+| Download da mídia | os bytes do vídeo | **5 a 100+ MB** |
+
+Só a **extração** é bloqueada pelo IP de datacenter; o CDN que serve os
+fragmentos não liga para isso. Então a extração sai pelo proxy e a mídia vai
+direto:
+
+1. o worker roda `--dump-single-json` pelo `RESOLVE_PROXY_URL` e grava a
+   extração em `extracao.info.json` dentro do diretório do download;
+2. o download roda com `--load-info-json` e **sem proxy** — com a extração em
+   mãos o yt-dlp não volta à plataforma, vai direto aos bytes.
+
+Medido de ponta a ponta com um proxy que conta bytes, baixando um vídeo do X
+pelo código do projeto: **62 KB pelo proxy, 5,5 MB direto**. Com 1 GB de cota
+isso é a diferença entre ~100 vídeos e mais de dez mil.
+
+`RESOLVE_PROXY_URL` é independente de `PROXY_ENABLED`/`PROXY_URL`, que continuam
+sendo o proxy geral para **todo** o tráfego. Ligar os dois anula a economia, e o
+script de build avisa quando isso acontece.
+
+Falhar na extração pelo proxy não derruba o download: ele cai no caminho de uma
+fase só, que é o de sempre. Um proxy mal configurado degrada, não quebra.
 
 Um download é reenfileirado no máximo **3 vezes** (`MaxTentativasDownload`); o
 padrão do asynq, 25, viraria duas dezenas de tentativas seguidas contra quem já

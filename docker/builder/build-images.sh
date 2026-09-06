@@ -163,6 +163,13 @@ if [ "${PROXY_ENABLED:-false}" = "true" ] && [ -z "${PROXY_URL:-}" ]; then
     FALTOU=1
 fi
 
+# O proxy de resolução é pago por volume. Ligar o proxy GERAL junto manda o
+# vídeo inteiro por ele e queima a cota em poucos downloads — que é exatamente
+# o que a separação das duas variáveis existe para evitar.
+if [ -n "${RESOLVE_PROXY_URL:-}" ] && [ "${PROXY_ENABLED:-false}" = "true" ]; then
+    amarelo "  ATENÇÃO  RESOLVE_PROXY_URL e PROXY_ENABLED=true juntos: a mídia vai sair pelo proxy geral e a cota do residencial não será poupada"
+fi
+
 avisar SUPER_ADMIN_EMAIL "sem ele ninguém acessa o painel de contas do YouTube no primeiro deploy"
 
 # ---------------------------------------------------------------------------

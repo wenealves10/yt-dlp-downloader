@@ -46,6 +46,16 @@ type Config struct {
 	ProxyEnabled bool   `mapstructure:"PROXY_ENABLED"`
 	ProxyURL     string `mapstructure:"PROXY_URL"`
 
+	// ResolveProxyURL é um proxy usado SÓ para extrair metadados das
+	// plataformas que recusam IP de datacenter. Os bytes do vídeo nunca passam
+	// por ele.
+	//
+	// A separação existe por causa da conta: um proxy residencial é vendido por
+	// volume, e a extração custa dezenas de KB enquanto o vídeo custa dezenas
+	// de MB. Roteando tudo, 1 GB de cota dá cerca de cem vídeos; roteando só a
+	// extração, dá dezenas de milhares.
+	ResolveProxyURL string `mapstructure:"RESOLVE_PROXY_URL"`
+
 	// Turnstile
 	TurnstileSecret string `mapstructure:"TURNSTILE_SECRET"`
 

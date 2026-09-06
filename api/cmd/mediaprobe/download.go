@@ -13,7 +13,12 @@ import (
 // baixar exercita o caminho completo de download, imprimindo o progresso como
 // o worker o receberá.
 func baixar(url, formatoID string, cancelarApos time.Duration) {
-	provider := ytdlp.New(ytdlp.Config{DownloadTimeout: 10 * time.Minute})
+	// RESOLVE_PROXY_URL permite exercitar aqui a mesma separação de fases que o
+	// worker usa: extração por um caminho, mídia por outro.
+	provider := ytdlp.New(ytdlp.Config{
+		DownloadTimeout: 10 * time.Minute,
+		ResolveProxyURL: os.Getenv("RESOLVE_PROXY_URL"),
+	})
 
 	dir, err := os.MkdirTemp("", "probe-")
 	if err != nil {

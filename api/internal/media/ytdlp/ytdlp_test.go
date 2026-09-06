@@ -89,7 +89,7 @@ func TestArgsArquivoNuncaMontaComandoPorConcatenacao(t *testing.T) {
 		Kind:     media.KindVideo,
 		FormatID: "137",
 		Filename: "video_abc",
-	}, "/tmp/saida")
+	}, "/tmp/saida", "")
 
 	// O "--" precisa vir logo antes da URL: sem ele, uma URL começando com
 	// hífen viraria opção do processo.
@@ -481,7 +481,7 @@ func TestImpersonacaoApenasNasPlataformasQueExigem(t *testing.T) {
 		media.PlatformVimeo, media.PlatformDailymotion,
 	}
 	for _, plataforma := range exigem {
-		require.True(t, plataformasQueExigemImpersonacao[plataforma], plataforma)
+		require.True(t, plataformasQueRecusamDatacenter[plataforma], plataforma)
 	}
 
 	naoExigem := []media.Platform{
@@ -489,7 +489,7 @@ func TestImpersonacaoApenasNasPlataformasQueExigem(t *testing.T) {
 		media.PlatformSoundCloud, media.PlatformUnknown,
 	}
 	for _, plataforma := range naoExigem {
-		require.False(t, plataformasQueExigemImpersonacao[plataforma], plataforma)
+		require.False(t, plataformasQueRecusamDatacenter[plataforma], plataforma)
 	}
 }
 
@@ -501,12 +501,12 @@ func TestArgsBaseNaoMisturaUserAgentComImpersonacao(t *testing.T) {
 	provider := New(Config{Binary: binarioFalso(t, "yt-dlp", "2025.09.01"), UserAgent: "UA-do-projeto"})
 
 	// Numa plataforma que não impersona, o User-Agent configurado vale.
-	semImpersonacao := provider.argsBase(media.PlatformYouTube)
+	semImpersonacao := provider.argsBase(media.PlatformYouTube, faseExtracao)
 	require.Contains(t, semImpersonacao, "--user-agent")
 	require.Contains(t, semImpersonacao, "UA-do-projeto")
 
 	// Onde impersona, os dois nunca aparecem juntos.
-	comImpersonacao := provider.argsBase(media.PlatformReddit)
+	comImpersonacao := provider.argsBase(media.PlatformReddit, faseExtracao)
 	if contemArg(comImpersonacao, "--impersonate") {
 		require.NotContains(t, comImpersonacao, "--user-agent",
 			"User-Agent próprio e impersonação não podem coexistir")
@@ -559,8 +559,8 @@ func TestImpersonacaoNaoVazaParaPlataformaForaDaLista(t *testing.T) {
 	})
 
 	require.Empty(t, provider.argsImpersonacao(media.PlatformYouTube))
-	require.NotContains(t, provider.argsBase(media.PlatformYouTube), "--impersonate")
-	require.Contains(t, provider.argsBase(media.PlatformReddit), "--impersonate")
+	require.NotContains(t, provider.argsBase(media.PlatformYouTube, faseExtracao), "--impersonate")
+	require.Contains(t, provider.argsBase(media.PlatformReddit, faseExtracao), "--impersonate")
 }
 
 // O caso que mais confunde: a API resolve o link e o worker falha ao baixar,
@@ -609,4 +609,90 @@ func TestExplicarBloqueioNaoTocaNoQueNaoEhSeuCaso(t *testing.T) {
 		"curl-cffi")
 
 	require.Nil(t, semSuporte.explicarBloqueio(nil, media.PlatformTwitter))
+}
+
+// A separação que torna um proxy residencial viável: a extração custa dezenas
+// de KB e pode sair por ele; a mídia custa dezenas de MB e nunca pode.
+func TestProxyDeResolucaoNuncaCarregaAMidia(t *testing.T) {
+	provider := New(Config{
+		Binary:          binarioFalso(t, "yt-dlp", "Chrome-136  curl_cffi"),
+		ProxyURL:        "",
+		ResolveProxyURL: "http://proxy-residencial:8080",
+	})
+
+	extracao := provider.proxyDa(media.PlatformTwitter, faseExtracao)
+	require.Equal(t, "http://proxy-residencial:8080", extracao,
+		"a extração de uma plataforma bloqueada deve sair pelo proxy")
+
+	midia := provider.proxyDa(media.PlatformTwitter, faseMidia)
+	require.Empty(t, midia,
+		"os bytes do vídeo NUNCA podem sair pelo proxy de resolução: queimariam a cota")
+}
+
+// Plataforma que não é bloqueada não gasta cota nenhuma.
+func TestProxyDeResolucaoNaoEhUsadoOndeNaoPrecisa(t *testing.T) {
+	provider := New(Config{
+		Binary:          binarioFalso(t, "yt-dlp", "x"),
+		ResolveProxyURL: "http://proxy-residencial:8080",
+	})
+
+	require.Empty(t, provider.proxyDa(media.PlatformYouTube, faseExtracao))
+	require.Empty(t, provider.proxyDa(media.PlatformYouTube, faseMidia))
+}
+
+// O proxy geral continua valendo para tudo, quando configurado: ele é outra
+// decisão, com outra finalidade.
+func TestProxyGeralContinuaValendoNasDuasFases(t *testing.T) {
+	provider := New(Config{
+		Binary:   binarioFalso(t, "yt-dlp", "x"),
+		ProxyURL: "http://proxy-geral:3128",
+	})
+
+	require.Equal(t, "http://proxy-geral:3128", provider.proxyDa(media.PlatformTwitter, faseExtracao))
+	require.Equal(t, "http://proxy-geral:3128", provider.proxyDa(media.PlatformTwitter, faseMidia))
+	require.Equal(t, "http://proxy-geral:3128", provider.proxyDa(media.PlatformYouTube, faseMidia))
+}
+
+// Com a extração pronta, o download não pode voltar à plataforma: passar a URL
+// junto faria exatamente isso, e o proxy teria sido em vão.
+func TestArgsArquivoComExtracaoProntaNaoPassaAUrl(t *testing.T) {
+	provider := New(Config{Binary: "yt-dlp"})
+	req := media.Request{
+		URL: "https://x.com/user/status/1", Filename: "media_abc",
+		Kind: media.KindVideo, FormatID: "hls-720", MaxHeight: 720,
+	}
+
+	args := provider.argsArquivo(req, t.TempDir(), "/tmp/dl/extracao.info.json")
+
+	require.Contains(t, args, "--load-info-json")
+	require.Contains(t, args, "/tmp/dl/extracao.info.json")
+	require.NotContains(t, args, req.URL, "a URL faria o yt-dlp extrair de novo")
+	// A escolha de formato continua valendo sobre a extração carregada.
+	require.Contains(t, args, "-f")
+}
+
+// Sem extração separada, nada muda: é o caminho de sempre.
+func TestArgsArquivoSemExtracaoUsaAUrl(t *testing.T) {
+	provider := New(Config{Binary: "yt-dlp"})
+	req := media.Request{URL: "https://youtu.be/abc", Filename: "media_abc", Kind: media.KindVideo}
+
+	args := provider.argsArquivo(req, t.TempDir(), "")
+
+	require.NotContains(t, args, "--load-info-json")
+	require.Equal(t, req.URL, args[len(args)-1])
+	require.Equal(t, "--", args[len(args)-2])
+}
+
+// O arquivo de extração fica no mesmo diretório do download; ele não pode ser
+// confundido com o resultado.
+func TestExtracaoNaoEhConfundidaComOArquivoFinal(t *testing.T) {
+	dir := t.TempDir()
+	base := "media_abc"
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir, nomeInfoJSON), []byte(`{"id":"x"}`), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, base+".mp4"), []byte("conteudo do video"), 0o600))
+
+	caminho, _, err := arquivoProduzido(dir, base)
+	require.NoError(t, err)
+	require.Equal(t, filepath.Join(dir, base+".mp4"), caminho)
 }

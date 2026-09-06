@@ -17,8 +17,8 @@ import (
 // versão que some numa atualização.
 const alvoImpersonacao = "chrome"
 
-// plataformasQueExigemImpersonacao são as que recusam um cliente HTTP comum
-// mesmo com sessão autenticada.
+// plataformasQueRecusamDatacenter são as que recusam um cliente HTTP comum
+// vindo de um servidor, mesmo com sessão autenticada.
 //
 // O bloqueio delas é por fingerprint de TLS, e não por conta: o Reddit responde
 // `HTTP Error 403: Blocked` já na PRIMEIRA requisição, antes de olhar cookie
@@ -27,7 +27,10 @@ const alvoImpersonacao = "chrome"
 //
 // É uma lista, e não um padrão global: o YouTube funciona bem sem isso, e
 // impersonar onde não é preciso só adiciona uma dependência ao caminho crítico.
-var plataformasQueExigemImpersonacao = map[media.Platform]bool{
+// A mesma lista governa duas decisões, porque as duas atacam o mesmo bloqueio:
+// imitar o handshake de um navegador e, quando houver, sair pelo proxy de
+// resolução.
+var plataformasQueRecusamDatacenter = map[media.Platform]bool{
 	media.PlatformReddit:      true,
 	media.PlatformTwitter:     true,
 	media.PlatformPinterest:   true,
@@ -78,7 +81,7 @@ func (p *Provider) suportaImpersonacao() bool {
 // argsImpersonacao devolve os argumentos de impersonação para a plataforma, ou
 // nada quando ela não precisa ou o suporte não existe.
 func (p *Provider) argsImpersonacao(plataforma media.Platform) []string {
-	if !plataformasQueExigemImpersonacao[plataforma] || !p.suportaImpersonacao() {
+	if !plataformasQueRecusamDatacenter[plataforma] || !p.suportaImpersonacao() {
 		return nil
 	}
 	return []string{"--impersonate", alvoImpersonacao}
@@ -110,7 +113,7 @@ func (p *Provider) explicarBloqueio(err error, plataforma media.Platform) error 
 	if err == nil {
 		return nil
 	}
-	if !plataformasQueExigemImpersonacao[plataforma] || p.suportaImpersonacao() {
+	if !plataformasQueRecusamDatacenter[plataforma] || p.suportaImpersonacao() {
 		return err
 	}
 

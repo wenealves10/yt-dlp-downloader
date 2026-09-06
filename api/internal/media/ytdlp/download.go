@@ -3,6 +3,7 @@ package ytdlp
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -60,7 +61,12 @@ func (p *Provider) Download(
 	}
 
 	inicio := time.Now()
-	args := p.argsArquivo(req, saidaAbs)
+
+	// Extração à parte quando há proxy de resolução: ela sai por ele, e os
+	// bytes da mídia não.
+	infoJSON := p.extrairInfoSeparada(ctx, req, saidaAbs)
+
+	args := p.argsArquivo(req, saidaAbs, infoJSON)
 
 	// O agregador é quem vê o download como um todo; o yt-dlp só sabe falar de
 	// uma faixa por vez.
@@ -99,8 +105,12 @@ func (p *Provider) Download(
 
 // argsArquivo monta os argumentos do download. Tudo estruturado: nenhuma parte
 // vem de concatenação com entrada do usuário.
-func (p *Provider) argsArquivo(req media.Request, saidaAbs string) []string {
-	args := p.argsBase(plataformaDaURL(req.URL))
+//
+// Quando infoJSON está preenchido, o yt-dlp NÃO volta à plataforma para extrair
+// nada: ele lê a extração pronta do arquivo e vai direto aos bytes da mídia. É
+// isso que permite a extração sair por um proxy e o download não.
+func (p *Provider) argsArquivo(req media.Request, saidaAbs, infoJSON string) []string {
+	args := p.argsBase(plataformaDaURL(req.URL), faseMidia)
 
 	// --newline força uma linha por atualização; sem isso o yt-dlp reescreve a
 	// mesma linha com \r e o scanner nunca entrega nada.
@@ -142,9 +152,59 @@ func (p *Provider) argsArquivo(req media.Request, saidaAbs string) []string {
 		args = append(args, "--merge-output-format", "mp4")
 	}
 
+	if infoJSON != "" {
+		// Com a extração já em mãos, a URL não entra: passá-la faria o yt-dlp
+		// ir à plataforma de novo, que é justamente o que se quer evitar.
+		return append(args, "--load-info-json", infoJSON)
+	}
+
 	// O "--" encerra as opções: o que vier depois é tratado como URL, mesmo que
 	// comece com hífen.
 	return append(args, "--", req.URL)
+}
+
+// nomeInfoJSON é onde a extração é gravada dentro do diretório do download.
+// Fica junto do resto e some com ele na limpeza.
+const nomeInfoJSON = "extracao.info.json"
+
+// extrairInfoSeparada faz a extração de metadados em um processo próprio, para
+// que ela possa sair por um caminho de rede diferente do download.
+//
+// Devolve o caminho do arquivo, ou "" para o download seguir do jeito normal —
+// sem proxy de resolução configurado, ou numa plataforma que não precisa dele,
+// não há motivo para pagar um processo a mais.
+//
+// Falhar aqui NÃO derruba o download: ele cai no caminho de uma fase só, que é
+// o que sempre foi. Um proxy mal configurado degrada, não quebra.
+func (p *Provider) extrairInfoSeparada(ctx context.Context, req media.Request, saidaAbs string) string {
+	plataforma := plataformaDaURL(req.URL)
+	if p.cfg.ResolveProxyURL == "" || !plataformasQueRecusamDatacenter[plataforma] {
+		return ""
+	}
+
+	args := p.argsBase(plataforma, faseExtracao)
+	args = append(args, "--dump-single-json", "--no-playlist", "--skip-download")
+	if req.CookieFile != "" {
+		args = append(args, "--cookies", req.CookieFile)
+	}
+	args = append(args, "--", req.URL)
+
+	var bruto strings.Builder
+	stderr, err := p.runner.executar(ctx, args, func(linha string) {
+		bruto.WriteString(linha)
+	})
+	if err != nil {
+		log.Printf("ytdlp: extração pelo proxy falhou (%s); seguindo sem ela: %s",
+			plataforma, resumirStderr(stderr))
+		return ""
+	}
+
+	caminho := filepath.Join(saidaAbs, nomeInfoJSON)
+	if err := os.WriteFile(caminho, []byte(bruto.String()), 0o600); err != nil {
+		log.Printf("ytdlp: não foi possível gravar a extração: %v", err)
+		return ""
+	}
+	return caminho
 }
 
 // plataformaDaURL identifica a plataforma da URL já normalizada. Um erro aqui

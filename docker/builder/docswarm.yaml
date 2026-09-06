@@ -64,6 +64,8 @@ x-downloader: &downloader
   MEDIA_DOWNLOAD_TIMEOUT: "2h"
   PROXY_ENABLED: "${PROXY_ENABLED}"
   PROXY_URL: "${PROXY_URL}"
+  # Proxy só da extração de metadados; a mídia nunca passa por ele.
+  RESOLVE_PROXY_URL: "${RESOLVE_PROXY_URL}"
   YOUTUBE_DL_FILE_COOKIES: "${YOUTUBE_DL_FILE_COOKIES}"
   YOUTUBE_DL_USER_AGENT: "${YOUTUBE_DL_USER_AGENT}"
   YOUTUBE_DL_REFERER: "${YOUTUBE_DL_REFERER}"

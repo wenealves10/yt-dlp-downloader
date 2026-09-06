@@ -161,7 +161,7 @@ func melhorQue(candidato, atual formatoJSON) bool {
 // poder ser verificado sem subir processo: é aqui que o arquivo de sessão entra,
 // e passá-lo ou não muda o que a plataforma responde.
 func (p *Provider) argsMetadata(parsed *url.URL, opts media.MetadataOptions) []string {
-	args := p.argsBase(media.PlatformFor(parsed))
+	args := p.argsBase(media.PlatformFor(parsed), faseExtracao)
 	args = append(args,
 		"--dump-single-json",
 		"--no-playlist",

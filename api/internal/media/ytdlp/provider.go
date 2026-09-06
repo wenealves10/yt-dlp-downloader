@@ -18,9 +18,14 @@ type Config struct {
 	// FFmpegBinary é usado para juntar faixas e converter áudio.
 	FFmpegBinary string
 	// ProxyURL, quando presente, vale para metadados e download.
-	ProxyURL  string
-	UserAgent string
-	Referer   string
+	ProxyURL string
+	// ResolveProxyURL vale APENAS para a extração de metadados, e apenas nas
+	// plataformas que recusam IP de datacenter. Os bytes do vídeo nunca passam
+	// por ele: é o que permite usar um proxy residencial pago por volume sem
+	// queimar a cota — a extração custa dezenas de KB, o vídeo dezenas de MB.
+	ResolveProxyURL string
+	UserAgent       string
+	Referer         string
 	// MetadataTimeout limita a resolução; ela roda dentro de uma requisição
 	// HTTP e não pode segurar a conexão indefinidamente.
 	MetadataTimeout time.Duration
@@ -90,7 +95,32 @@ func (p *Provider) CanHandle(parsed *url.URL) bool {
 // argsBase monta os argumentos comuns. A plataforma entra porque duas decisões
 // dependem dela: imitar ou não um navegador, e enviar ou não o nosso
 // User-Agent — as duas são incompatíveis entre si.
-func (p *Provider) argsBase(plataforma media.Platform) []string {
+// fase distingue os dois tipos de requisição que o yt-dlp faz. Elas têm ordens
+// de grandeza diferentes de tráfego, e por isso podem sair por caminhos
+// diferentes.
+type fase int
+
+const (
+	// faseExtracao pede metadados: algumas dezenas de KB.
+	faseExtracao fase = iota
+	// faseMidia baixa os bytes do conteúdo: de MB a GB.
+	faseMidia
+)
+
+// proxyDa escolhe por onde a requisição sai.
+//
+// Só a extração pode usar o proxy de resolução, e só nas plataformas que
+// recusam IP de datacenter. Mandar a mídia por ele queimaria a cota do proxy
+// residencial em poucos vídeos, que é exatamente o que a separação evita.
+func (p *Provider) proxyDa(plataforma media.Platform, etapa fase) string {
+	if etapa == faseExtracao && p.cfg.ResolveProxyURL != "" &&
+		plataformasQueRecusamDatacenter[plataforma] {
+		return p.cfg.ResolveProxyURL
+	}
+	return p.cfg.ProxyURL
+}
+
+func (p *Provider) argsBase(plataforma media.Platform, etapa fase) []string {
 	args := []string{
 		// Sem cor e sem barra de progresso interativa: a saída é lida por
 		// máquina.
@@ -107,8 +137,8 @@ func (p *Provider) argsBase(plataforma media.Platform) []string {
 		"--fragment-retries", "3",
 	}
 
-	if p.cfg.ProxyURL != "" {
-		args = append(args, "--proxy", p.cfg.ProxyURL)
+	if proxy := p.proxyDa(plataforma, etapa); proxy != "" {
+		args = append(args, "--proxy", proxy)
 	}
 
 	args = append(args, p.argsImpersonacao(plataforma)...)

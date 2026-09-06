@@ -25,9 +25,13 @@ func Registry(cfg configs.Config, role media.Role) *media.Registry {
 	}
 
 	ytdlpProvider := ytdlp.New(ytdlp.Config{
-		Binary:          cfg.YtDlpBinary,
-		FFmpegBinary:    cfg.FFmpegBinary,
-		ProxyURL:        proxy,
+		Binary:       cfg.YtDlpBinary,
+		FFmpegBinary: cfg.FFmpegBinary,
+		ProxyURL:     proxy,
+		// Independe de PROXY_ENABLED: o proxy de resolução é uma decisão
+		// separada, com custo e finalidade próprios. Ligar o proxy geral
+		// mandaria o vídeo inteiro por ele, que é o oposto do que se quer.
+		ResolveProxyURL: cfg.ResolveProxyURL,
 		UserAgent:       cfg.YoutubeDLUserAgent,
 		Referer:         cfg.YoutubeDLReferer,
 		MetadataTimeout: duracaoOu(cfg.MediaMetadataTimeout, 45*time.Second),
