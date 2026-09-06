@@ -376,6 +376,11 @@ plataformas. O painel de providers mostra se está ativa.
 Se mesmo assim a plataforma recusar, o bloqueio é da faixa de IP e nenhuma
 mudança na aplicação resolve — aí a saída é a variável `PROXY_URL`.
 
+Um download é reenfileirado no máximo **3 vezes** (`MaxTentativasDownload`); o
+padrão do asynq, 25, viraria duas dezenas de tentativas seguidas contra quem já
+disse não, que é o tipo de insistência que aprofunda um bloqueio em vez de
+contorná-lo. Erros de conteúdo já não repetem nenhuma vez.
+
 ### Diagnóstico
 
 `/admin/providers` mostra o estado do mecanismo — versão do yt-dlp, ffmpeg e
@@ -609,6 +614,17 @@ UPDATE ... WHERE id = (SELECT ... ORDER BY priority, last_used_at NULLS FIRST
 - **Rodízio:** vence a conta usada há mais tempo, então o uso se distribui
   sozinho. `priority` (menor = preferida) permite manter uma conta principal e
   outras de reserva; com prioridades iguais o rodízio é circular.
+- **Quando a conta NÃO sai do rodízio:** bloqueio de IP, limite de requisições,
+  5xx e queda de rede não são culpa da conta. Essas causas têm precedência sobre
+  qualquer palavra de login na mensagem, porque várias plataformas misturam as
+  duas ideias na mesma linha — o X responde a um IP bloqueado com um texto que
+  também fala em fazer login.
+
+  Sem essa distinção o efeito era uma cascata: a primeira falha passageira tirava
+  do rodízio uma conta perfeitamente boa, a tentativa seguinte ia **sem cookie
+  nenhum** e falhava por outro motivo, e a conta aparecia "desconectando"
+  sozinha. O administrador clicava em "Verificar sessão", ela voltava — porque a
+  sessão nunca tinha deixado de valer.
 - **Concorrência:** o `SKIP LOCKED` faz dois workers simultâneos pegarem contas
   diferentes em vez de disputarem a mesma linha, e o uso é registrado na mesma
   operação da seleção.

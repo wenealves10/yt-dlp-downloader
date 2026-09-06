@@ -300,6 +300,34 @@ var authFailureMarkers = []string{
 	"log in to view",
 }
 
+// causasTransitorias são falhas que NÃO são culpa da conta: a plataforma
+// recusando o IP do servidor, pedindo uma pausa, ou a rede caindo.
+//
+// Elas têm precedência sobre qualquer marcador de autenticação, porque várias
+// plataformas misturam as duas ideias na mesma mensagem — o X responde a um IP
+// bloqueado com um texto que também fala em login. Sem esta lista, um bloqueio
+// temporário tirava do rodízio uma conta perfeitamente boa, e a tentativa
+// seguinte ia sem cookie nenhum: o primeiro tropeço envenenava todas as
+// próximas, e o administrador via a conta "desconectando" sozinha.
+var causasTransitorias = []string{
+	"http error 403", "http error 429", "http error 5",
+	"rate limit", "rate-limit", "too many requests",
+	"blocked", "access denied", "forbidden", "captcha",
+	"connection reset", "connection refused", "network is unreachable",
+	"temporary failure in name resolution", "read operation timed out",
+	"connection timed out", "unable to connect to proxy",
+}
+
+// ehTransitorio informa se a saída aponta para uma causa que não é da conta.
+func ehTransitorio(minuscula string) bool {
+	for _, marcador := range causasTransitorias {
+		if strings.Contains(minuscula, marcador) {
+			return true
+		}
+	}
+	return false
+}
+
 // IsAuthFailure informa se a saída do yt-dlp indica sessão recusada.
 func IsAuthFailure(output []byte) bool {
 	return authFailureLine(output) != ""
@@ -316,6 +344,12 @@ func AuthFailureReason(output []byte) string {
 }
 
 func authFailureLine(output []byte) string {
+	// Causa transitória vence: a conta não tem culpa e precisa continuar no
+	// rodízio para a próxima tentativa ainda ter uma sessão para usar.
+	if ehTransitorio(strings.ToLower(string(output))) {
+		return ""
+	}
+
 	for _, line := range strings.Split(string(output), "\n") {
 		trimmed := strings.TrimSpace(line)
 		lowered := strings.ToLower(trimmed)
@@ -334,5 +368,19 @@ func ReportAuthFailure(ctx context.Context, provider Provider, lease *Lease, out
 	if provider == nil || lease == nil {
 		return
 	}
-	provider.ReportAuthFailure(ctx, lease, AuthFailureReason(output))
+
+	// A GUARDA que faltava. Antes daqui, QUALQUER falha de download tirava a
+	// conta do rodízio — bloqueio de IP, limite de requisições, queda de rede,
+	// disco cheio. A conta ia para "Requer autenticação" com a sessão intacta,
+	// o administrador clicava em "Verificar sessão" e ela voltava, porque nunca
+	// tinha deixado de valer. É o que fazia a conta parecer que desconectava
+	// sozinha.
+	motivo := AuthFailureReason(output)
+	if motivo == "" {
+		log.Printf("ytaccounts: falha sem relação com a sessão; conta mantida no rodízio account_id=%s plataforma=%s",
+			lease.AccountID, lease.Plataforma)
+		return
+	}
+
+	provider.ReportAuthFailure(ctx, lease, motivo)
 }

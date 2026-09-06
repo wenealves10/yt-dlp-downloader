@@ -259,7 +259,8 @@ func (s *Server) criarDownloadMedia(ctx *gin.Context, req criarDownloadMediaRequ
 	task, err := tasks.NewDownloadMediaTask(download.ID.String())
 	if err == nil {
 		_, err = s.queueClient.EnqueueContext(ctx.Request.Context(), task,
-			asynq.Queue(queues.TypeDownloadMediaQueue))
+			asynq.Queue(queues.TypeDownloadMediaQueue),
+			asynq.MaxRetry(queues.MaxTentativasDownload))
 	}
 	if err != nil {
 		log.Printf("media: falha ao enfileirar id=%s: %v", download.ID, err)

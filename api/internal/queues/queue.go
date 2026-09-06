@@ -39,3 +39,12 @@ const (
 	QueueWeightTempCleanup      = 1
 	QueueWeightMediaHealth      = 1
 )
+
+// MaxTentativasDownload limita quantas vezes um download é reenfileirado.
+//
+// O padrão do asynq é 25. Contra uma plataforma que está recusando o servidor,
+// isso vira duas dezenas de tentativas seguidas contra quem já disse não — o
+// tipo de insistência que aprofunda o bloqueio em vez de contorná-lo. Três
+// cobre a falha passageira (uma rede que oscilou, um 5xx) e para por aí; erros
+// de conteúdo já não chegam a repetir.
+const MaxTentativasDownload = 3

@@ -158,3 +158,88 @@ func TestIsAuthFailureIgnoraMensagemAmbigua(t *testing.T) {
 		t.Error("mensagem ambígua não pode tirar a conta do rodízio")
 	}
 }
+
+// providerFalso registra se a conta foi tirada do rodízio.
+type providerFalso struct {
+	marcada bool
+	motivo  string
+}
+
+func (p *providerFalso) Acquire(context.Context, string) (*Lease, error) { return nil, ErrNoAccount }
+func (p *providerFalso) ReportAuthFailure(_ context.Context, _ *Lease, motivo string) {
+	p.marcada, p.motivo = true, motivo
+}
+
+// A guarda que faltava: antes disso QUALQUER falha de download tirava a conta
+// do rodízio. Ela ia para "Requer autenticação" com a sessão intacta, o
+// administrador clicava em "Verificar sessão" e ela voltava — a conta parecia
+// desconectar sozinha.
+func TestReportAuthFailureNaoMarcaContaPorCausaTransitoria(t *testing.T) {
+	transitorias := map[string]string{
+		"IP bloqueado":  "ERROR: [twitter] 1: Unable to download webpage: HTTP Error 403: Blocked",
+		"limite":        "ERROR: [twitter] 1: Requested content is not available, rate-limit reached",
+		"429":           "ERROR: [Reddit] abc: HTTP Error 429: Too Many Requests",
+		"rede":          "ERROR: unable to download webpage: Connection reset by peer",
+		"servidor fora": "ERROR: [vimeo] 1: HTTP Error 503: Service Unavailable",
+		"captcha":       "ERROR: [pinterest] 1: Please solve the captcha",
+	}
+
+	for nome, saida := range transitorias {
+		falso := &providerFalso{}
+		lease := &Lease{Label: "conta", Plataforma: "twitter"}
+
+		ReportAuthFailure(context.Background(), falso, lease, []byte(saida))
+
+		if falso.marcada {
+			t.Errorf("[%s] a conta não pode sair do rodízio: %q", nome, saida)
+		}
+	}
+}
+
+// Uma causa transitória tem precedência mesmo quando a mensagem também fala em
+// login: várias plataformas misturam as duas ideias na mesma linha.
+func TestCausaTransitoriaVencePalavraDeLogin(t *testing.T) {
+	falso := &providerFalso{}
+
+	ReportAuthFailure(context.Background(), falso,
+		&Lease{Label: "conta", Plataforma: "twitter"},
+		[]byte("ERROR: [twitter] 1: HTTP Error 403: Blocked. You must be logged in to view this."))
+
+	if falso.marcada {
+		t.Error("bloqueio de IP não pode ser confundido com sessão expirada")
+	}
+}
+
+// E a sessão realmente expirada continua tirando a conta do rodízio — sem isso,
+// um cookie morto derrubaria todo download que o pegasse.
+func TestReportAuthFailureAindaMarcaSessaoExpirada(t *testing.T) {
+	casos := []string{
+		"ERROR: [youtube] abc: The provided YouTube account cookies are no longer valid.",
+		"ERROR: [vimeo] 1: The web client only works when logged-in.",
+	}
+
+	for _, saida := range casos {
+		falso := &providerFalso{}
+
+		ReportAuthFailure(context.Background(), falso,
+			&Lease{Label: "conta", Plataforma: "vimeo"}, []byte(saida))
+
+		if !falso.marcada {
+			t.Errorf("sessão expirada deveria tirar a conta do rodízio: %q", saida)
+		}
+		if falso.motivo == "" {
+			t.Error("o painel precisa do motivo para mostrar ao administrador")
+		}
+	}
+}
+
+// Sem lease não há conta envolvida: nada a marcar.
+func TestReportAuthFailureSemLeaseNaoFazNada(t *testing.T) {
+	falso := &providerFalso{}
+
+	ReportAuthFailure(context.Background(), falso, nil, []byte("qualquer coisa"))
+
+	if falso.marcada {
+		t.Error("sem conta emprestada não há o que marcar")
+	}
+}
