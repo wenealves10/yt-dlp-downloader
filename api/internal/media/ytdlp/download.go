@@ -61,6 +61,10 @@ func (p *Provider) Download(
 	inicio := time.Now()
 	args := p.argsArquivo(req, saidaAbs)
 
+	// O agregador é quem vê o download como um todo; o yt-dlp só sabe falar de
+	// uma faixa por vez.
+	agregador := novoAgregador(req.ExpectedBytes)
+
 	var informado string
 	stderr, err := p.download.executar(ctx, args, func(linha string) {
 		switch {
@@ -69,8 +73,9 @@ func (p *Provider) Download(
 			// imprime uma por faixa antes do arquivo unido.
 			informado = strings.TrimSpace(strings.TrimPrefix(linha, marcaArquivo))
 		case strings.HasPrefix(linha, marcaProgresso):
-			if progresso, ok := interpretarProgresso(strings.TrimPrefix(linha, marcaProgresso)); ok && onProgress != nil {
-				onProgress(progresso)
+			bruto, faixa, status, ok := interpretarProgresso(strings.TrimPrefix(linha, marcaProgresso))
+			if ok && onProgress != nil {
+				onProgress(agregador.aplicar(bruto, faixa, status))
 			}
 		}
 	})
@@ -102,7 +107,10 @@ func (p *Provider) argsArquivo(req media.Request, saidaAbs string) []string {
 		"--newline",
 		"--progress",
 		"--progress-template",
-		marcaProgresso+"%(progress.status)s|%(progress.downloaded_bytes)s|%(progress.total_bytes)s|%(progress.total_bytes_estimate)s|%(progress.speed)s|%(progress.eta)s",
+		// O id do formato no fim é o que identifica a FAIXA: com vídeo e áudio
+		// separados, é ele que diz que uma acabou e outra começou. Sem esse
+		// campo só restava adivinhar pela contagem voltando a zero.
+		marcaProgresso+"%(progress.status)s|%(progress.downloaded_bytes)s|%(progress.total_bytes)s|%(progress.total_bytes_estimate)s|%(progress.speed)s|%(progress.eta)s|%(info.format_id)s",
 		// "after_move" é obrigatório: sem o momento, --print dispara ANTES do
 		// download e imprime um caminho vazio. --no-simulate é igualmente
 		// obrigatório, porque --print sozinho implica simulação e nada seria
@@ -151,20 +159,27 @@ func (p *Provider) argsArquivo(req media.Request, saidaAbs string) []string {
 
 // interpretarProgresso lê a linha do progress-template. Campos ausentes chegam
 // como "NA"; o yt-dlp não conhece o tamanho total de todo conteúdo.
-func interpretarProgresso(linha string) (media.Progress, bool) {
+//
+// O que sai daqui é o progresso de UMA FAIXA, cru como o yt-dlp reporta. Quem
+// junta as faixas num progresso único é o agregador — misturar as duas coisas
+// aqui foi o que fez a barra reiniciar do zero no meio do download.
+func interpretarProgresso(linha string) (progresso media.Progress, faixa, status string, ok bool) {
 	campos := strings.Split(linha, "|")
 	if len(campos) < 6 {
-		return media.Progress{}, false
+		return media.Progress{}, "", "", false
 	}
 
-	status := campos[0]
+	status = campos[0]
 	baixado := paraInt(campos[1])
 	total := paraInt(campos[2])
 	if total == 0 {
 		total = paraInt(campos[3]) // estimativa, quando o exato não vem
 	}
+	if len(campos) >= 7 {
+		faixa = idDeFaixa(campos[6])
+	}
 
-	progresso := media.Progress{
+	progresso = media.Progress{
 		DownloadedBytes: baixado,
 		TotalBytes:      total,
 		SpeedBPS:        paraInt(campos[4]),
@@ -178,15 +193,17 @@ func interpretarProgresso(linha string) (media.Progress, bool) {
 		}
 	}
 
-	// "finished" no download bruto significa que começou o pós-processamento
-	// (juntar faixas, converter para MP3), que pode levar minutos num arquivo
-	// grande. Sem marcar isso, a barra fica em 100% parecendo travada.
-	if status == "finished" {
-		progresso.Postprocess = true
-		progresso.Percent = 100
-	}
+	return progresso, faixa, status, true
+}
 
-	return progresso, true
+// idDeFaixa descarta os marcadores de "não sei" do yt-dlp. Tratá-los como um id
+// de verdade faria toda amostra parecer uma faixa nova.
+func idDeFaixa(valor string) string {
+	valor = strings.TrimSpace(valor)
+	if valor == "NA" || valor == "None" || valor == "-" {
+		return ""
+	}
+	return valor
 }
 
 // paraInt aceita inteiro, decimal e os "NA"/"None" que o yt-dlp emite quando

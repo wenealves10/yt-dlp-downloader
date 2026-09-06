@@ -52,11 +52,12 @@ func (p *JobYoutubeHealthCheck) checkAccount(ctx context.Context, account db.You
 	checkCtx, cancel := context.WithTimeout(ctx, perAccountCheckTimeout)
 	defer cancel()
 
-	result, err := p.browser.Check(checkCtx, account.ID)
+	result, err := p.browser.Check(checkCtx, account.ID, account.Platform)
 	if err != nil {
 		// Falha de infraestrutura não é sessão expirada: o estado vira ERROR e
 		// o administrador não recebe um pedido de login desnecessário.
-		log.Printf("jobs: health check falhou account_id=%s label=%s erro=%v", account.ID, account.Label, err)
+		log.Printf("jobs: health check falhou account_id=%s label=%s plataforma=%s erro=%v",
+			account.ID, account.Label, account.Platform, err)
 		p.applyStatus(ctx, account, db.CoreYoutubeAccountStatusERROR, browser.UserMessage(err), "")
 		return
 	}

@@ -50,7 +50,7 @@ export function getYoutubeAccounts(token: string) {
 }
 
 export function createYoutubeAccount(token: string) {
-  return (payload: { label: string; email?: string }) =>
+  return (payload: { label: string; email?: string; platform?: string }) =>
     request<YoutubeAccount>(token, basePath, {
       method: "POST",
       body: JSON.stringify(payload),

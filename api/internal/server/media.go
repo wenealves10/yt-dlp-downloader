@@ -12,13 +12,16 @@ import (
 	"github.com/hibiken/asynq"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/wenealves10/yt-dlp-downloader/internal/browser"
 	"github.com/wenealves10/yt-dlp-downloader/internal/db"
 	"github.com/wenealves10/yt-dlp-downloader/internal/jobs"
+	"github.com/wenealves10/yt-dlp-downloader/internal/libs/stream"
 	"github.com/wenealves10/yt-dlp-downloader/internal/media"
 	"github.com/wenealves10/yt-dlp-downloader/internal/queues"
 	"github.com/wenealves10/yt-dlp-downloader/internal/tasks"
 	"github.com/wenealves10/yt-dlp-downloader/internal/tokens"
 	"github.com/wenealves10/yt-dlp-downloader/internal/utils"
+	"github.com/wenealves10/yt-dlp-downloader/internal/ytaccounts"
 )
 
 // resolveTimeout limita a resolução de metadados. Ela roda dentro da
@@ -65,7 +68,15 @@ func (s *Server) resolveMedia(ctx *gin.Context) {
 	requestCtx, cancelar := context.WithTimeout(ctx.Request.Context(), resolveTimeout)
 	defer cancelar()
 
-	metadata, normalizada, err := s.mediaRegistry.Metadata(requestCtx, req.URL)
+	// A sessão é emprestada já na resolução, e não só no download: o Vimeo
+	// recusa a leitura de metadados sem estar logado, então sem isto o usuário
+	// nem chegaria à tela de escolher a qualidade.
+	lease := s.sessaoPara(requestCtx, req.URL)
+	defer lease.Release()
+
+	metadata, normalizada, err := s.mediaRegistry.Metadata(requestCtx, req.URL, media.MetadataOptions{
+		CookieFile: arquivoDeSessao(lease),
+	})
 	if err != nil {
 		// O detalhe técnico fica no log; a tela recebe só a mensagem de
 		// domínio, sem saída de processo nem caminho de arquivo.
@@ -169,7 +180,12 @@ func (s *Server) criarDownloadMedia(ctx *gin.Context, req criarDownloadMediaRequ
 		requestCtx, cancelar := context.WithTimeout(ctx.Request.Context(), resolveTimeout)
 		defer cancelar()
 
-		metadata, normalizada, err = s.mediaRegistry.Metadata(requestCtx, req.URL)
+		lease := s.sessaoPara(requestCtx, req.URL)
+		defer lease.Release()
+
+		metadata, normalizada, err = s.mediaRegistry.Metadata(requestCtx, req.URL, media.MetadataOptions{
+			CookieFile: arquivoDeSessao(lease),
+		})
 		if err != nil {
 			log.Printf("media: falha ao resolver na criação: %v", err)
 			ctx.JSON(statusPara(err), gin.H{"error": media.UserMessage(err), "code": codigoErro(err)})
@@ -221,7 +237,7 @@ func (s *Server) criarDownloadMedia(ctx *gin.Context, req criarDownloadMediaRequ
 		FormatID:        pgtype.Text{String: escolhido.ID, Valid: escolhido.ID != ""},
 		QualityLabel:    pgtype.Text{String: escolhido.Label, Valid: escolhido.Label != ""},
 		Uploader:        pgtype.Text{String: metadata.Uploader, Valid: metadata.Uploader != ""},
-		TotalBytes:      escolhido.SizeBytes,
+		TotalBytes:      tamanhoEstimado(metadata.Formats, escolhido, kind),
 	})
 	if err != nil {
 		log.Printf("media: falha ao criar download: %v", err)
@@ -278,32 +294,123 @@ func (s *Server) cancelDownload(ctx *gin.Context) {
 		return
 	}
 
-	// O UPDATE já filtra por dono e por status: um download de outro usuário,
-	// ou já concluído, simplesmente não casa.
+	// A chave do Redis vem ANTES do UPDATE, e é gravada mesmo que o banco
+	// recuse: ela é o que alcança um processo já em andamento, e o worker
+	// checa a cada 2 s. Gravar depois abriria uma janela em que o download
+	// consta cancelado no banco e segue baixando em disco.
+	if s.redis != nil {
+		if err := s.redis.Set(ctx.Request.Context(),
+			jobs.ChaveCancelamento(downloadID.String()), "1", cancelTTL).Err(); err != nil {
+			log.Printf("media: falha ao sinalizar cancelamento id=%s: %v", downloadID, err)
+		}
+	}
+
+	// O UPDATE filtra por dono, e é idempotente quanto ao status: cancelar algo
+	// que acabou de terminar sozinho não é erro do usuário, é uma corrida que
+	// ele não tem como evitar. A resposta devolve o status que de fato vigora.
 	download, err := s.store.CancelDownload(ctx.Request.Context(), db.CancelDownloadParams{
 		ID: downloadID, UserID: userID,
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			ctx.JSON(http.StatusConflict,
-				errorResponse(errors.New("este download não pode mais ser cancelado")))
+			// Só sobra o caso de o download não existir ou não ser deste
+			// usuário — aí é 404 mesmo, e não um conflito.
+			ctx.JSON(http.StatusNotFound, errorResponse(errors.New("download não encontrado")))
 			return
 		}
 		ctx.JSON(http.StatusInternalServerError, errorResponse(errors.New("falha ao cancelar")))
 		return
 	}
 
-	if s.redis != nil {
-		if err := s.redis.Set(ctx.Request.Context(),
-			jobs.ChaveCancelamento(downloadID.String()), "1", cancelTTL).Err(); err != nil {
-			// O banco já marcou; o processo em andamento é que vai seguir até
-			// o fim e ter o resultado descartado.
-			log.Printf("media: falha ao sinalizar cancelamento id=%s: %v", downloadID, err)
-		}
+	// A tela não espera o worker perceber: quem cancelou precisa ver o card
+	// mudar na hora. O worker ainda publica o dele ao parar de verdade, e os
+	// dois eventos são idênticos.
+	if download.Status == db.CoreDownloadStatusCANCELED {
+		s.publicarCancelamento(ctx.Request.Context(), download)
 	}
 
-	log.Printf("media: cancelamento pedido id=%s por=%s", downloadID, userID)
+	log.Printf("media: cancelamento pedido id=%s por=%s status=%s", downloadID, userID, download.Status)
 	ctx.JSON(http.StatusOK, gin.H{"id": download.ID.String(), "status": download.Status})
+}
+
+// publicarCancelamento avisa a tela imediatamente. Uma falha aqui não é motivo
+// para a requisição falhar: o cancelamento já está gravado, e o próximo
+// carregamento da lista mostra o estado certo.
+func (s *Server) publicarCancelamento(ctx context.Context, download db.Download) {
+	if s.rdStream == nil {
+		return
+	}
+	evento := stream.DownloadEvent{
+		ID:            download.ID.String(),
+		UserID:        download.UserID.String(),
+		Status:        db.CoreDownloadStatusCANCELED,
+		Title:         download.Title,
+		Platform:      download.Platform,
+		PlatformLabel: media.Platform(download.Platform).Label(),
+	}
+	if err := s.rdStream.Publish(ctx, stream.StreamName, evento); err != nil {
+		log.Printf("media: falha ao publicar cancelamento id=%s: %v", download.ID, err)
+	}
+}
+
+// sessaoPara empresta a sessão gerenciada da plataforma da URL, quando existe.
+// A ausência não é erro: a maioria do conteúdo público resolve sem conta, e
+// exigir uma quebraria tudo que hoje funciona anônimo.
+func (s *Server) sessaoPara(ctx context.Context, bruta string) *ytaccounts.Lease {
+	if s.accounts == nil {
+		return nil
+	}
+	_, parsed, err := media.NormalizeURL(bruta)
+	if err != nil {
+		return nil
+	}
+
+	plataforma := string(media.PlatformFor(parsed))
+
+	// Só onde resolver anônimo comprovadamente falha. Buscar os cookies pode
+	// subir um Chrome headless sobre o perfil, e isso roda dentro da
+	// requisição de quem colou o link: pagar esse custo no YouTube, que
+	// resolve bem sem conta, seria trocar um problema por outro.
+	if !browser.PerfilDe(plataforma).MetadadosExigemSessao {
+		return nil
+	}
+
+	return ytaccounts.Acquire(ctx, s.accounts, plataforma)
+}
+
+// arquivoDeSessao evita espalhar checagem de nil por quem monta as opções.
+func arquivoDeSessao(lease *ytaccounts.Lease) string {
+	if lease == nil {
+		return ""
+	}
+	return lease.CookieFile
+}
+
+// tamanhoEstimado soma o que será baixado de verdade.
+//
+// Acima de 720p o formato de vídeo vem SEM áudio, e o download junta a melhor
+// faixa de áudio a ele. Guardar só o tamanho do vídeo dava um denominador curto
+// para a barra de progresso, que então travava perto do fim e só destravava com
+// a conclusão. Vale como estimativa: o provider corrige com o tamanho real
+// conforme baixa.
+func tamanhoEstimado(formatos []media.Format, escolhido media.Format, kind media.Kind) int64 {
+	total := escolhido.SizeBytes
+	if kind != media.KindVideo || escolhido.SizeBytes == 0 {
+		return total
+	}
+	// Um formato que já traz áudio (progressivo) não recebe faixa extra.
+	if escolhido.AudioCodec != "" && escolhido.AudioCodec != "none" {
+		return total
+	}
+
+	for _, formato := range formatos {
+		if formato.Kind == media.KindAudio && formato.SizeBytes > 0 {
+			// A lista já vem ordenada: o primeiro áudio é o que o "bestaudio"
+			// do seletor escolheria.
+			return total + formato.SizeBytes
+		}
+	}
+	return total
 }
 
 // escolherFormato valida o id contra os formatos deste conteúdo e devolve o

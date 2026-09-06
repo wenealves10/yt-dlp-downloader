@@ -1,6 +1,6 @@
 import React from "react";
 import { Link, useLocation } from "react-router-dom";
-import { ArrowLeft, BarChart3, Download, Server, Users, Youtube } from "lucide-react";
+import { ArrowLeft, BarChart3, Download, KeyRound, Server, Users } from "lucide-react";
 import { UserMenu } from "../user/UserMenu";
 import { useAuth } from "../../hooks/useAuth";
 
@@ -8,7 +8,9 @@ const ABAS = [
   { to: "/admin", rotulo: "Dashboard", icone: BarChart3, exato: true },
   { to: "/admin/users", rotulo: "Usuários", icone: Users, exato: false },
   { to: "/admin/downloads", rotulo: "Downloads", icone: Download, exato: false },
-  { to: "/admin/youtube/accounts", rotulo: "YouTube", icone: Youtube, exato: false },
+  // A rota mantém o caminho antigo para não quebrar link salvo; o rótulo
+  // deixou de ser "YouTube" porque as contas agora cobrem várias plataformas.
+  { to: "/admin/youtube/accounts", rotulo: "Contas", icone: KeyRound, exato: false },
   { to: "/admin/providers", rotulo: "Providers", icone: Server, exato: false },
 ];
 

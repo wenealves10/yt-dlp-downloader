@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
+	"github.com/wenealves10/yt-dlp-downloader/internal/browser"
 	"github.com/wenealves10/yt-dlp-downloader/internal/db"
 	"github.com/wenealves10/yt-dlp-downloader/internal/helpers"
 	"github.com/wenealves10/yt-dlp-downloader/internal/libs/stream"
@@ -111,7 +112,7 @@ func (p *JobDownloadVideo) downloadVideo(ctx context.Context, filename string, o
 
 	// A sessão gerenciada é emprestada só durante o download e o arquivo de
 	// cookies é destruído no Release.
-	lease := ytaccounts.Acquire(ctx, p.accounts)
+	lease := ytaccounts.Acquire(ctx, p.accounts, browser.PlataformaPadrao)
 	defer lease.Release()
 
 	args := append(ytaccounts.AuthArgs(lease),

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -115,7 +116,7 @@ type providerFalso struct {
 func (p *providerFalso) Name() string            { return p.nome }
 func (p *providerFalso) CanHandle(*url.URL) bool { return p.aceita }
 
-func (p *providerFalso) Metadata(context.Context, *url.URL) (*Metadata, error) {
+func (p *providerFalso) Metadata(context.Context, *url.URL, MetadataOptions) (*Metadata, error) {
 	p.chamadas++
 	if p.err != nil {
 		return nil, p.err
@@ -137,7 +138,7 @@ func TestRegistryUsaOPrimeiroQueAceita(t *testing.T) {
 	segundo := &providerFalso{nome: "b", aceita: true, metadata: &Metadata{Title: "de B"}}
 
 	registry := NewRegistry(primeiro, segundo)
-	metadata, _, err := registry.Metadata(context.Background(), "https://youtu.be/abc")
+	metadata, _, err := registry.Metadata(context.Background(), "https://youtu.be/abc", MetadataOptions{})
 
 	require.NoError(t, err)
 	require.Equal(t, "de A", metadata.Title)
@@ -152,7 +153,7 @@ func TestRegistryCaiParaOProximoQuandoOPrimeiroFalha(t *testing.T) {
 	segundo := &providerFalso{nome: "b", aceita: true, metadata: &Metadata{Title: "de B"}}
 
 	registry := NewRegistry(primeiro, segundo)
-	metadata, _, err := registry.Metadata(context.Background(), "https://vimeo.com/1")
+	metadata, _, err := registry.Metadata(context.Background(), "https://vimeo.com/1", MetadataOptions{})
 
 	require.NoError(t, err)
 	require.Equal(t, "b", metadata.Provider)
@@ -167,7 +168,7 @@ func TestRegistryNaoInsisteQuandoOProblemaEODoConteudo(t *testing.T) {
 		segundo := &providerFalso{nome: "b", aceita: true, metadata: &Metadata{Title: "de B"}}
 
 		registry := NewRegistry(primeiro, segundo)
-		_, _, err := registry.Metadata(context.Background(), "https://vimeo.com/1")
+		_, _, err := registry.Metadata(context.Background(), "https://vimeo.com/1", MetadataOptions{})
 
 		require.ErrorIs(t, err, tipo)
 		require.Zero(t, segundo.chamadas, "não devia tentar outro provider para %v", tipo)
@@ -176,7 +177,7 @@ func TestRegistryNaoInsisteQuandoOProblemaEODoConteudo(t *testing.T) {
 
 func TestRegistryRecusaQuandoNinguemAceita(t *testing.T) {
 	registry := NewRegistry(&providerFalso{nome: "a", aceita: false})
-	_, _, err := registry.Metadata(context.Background(), "https://exemplo.com/v")
+	_, _, err := registry.Metadata(context.Background(), "https://exemplo.com/v", MetadataOptions{})
 
 	require.ErrorIs(t, err, ErrUnsupportedPlatform)
 }
@@ -194,4 +195,56 @@ func TestUserMessageNaoVazaDetalheTecnico(t *testing.T) {
 
 	// Erro de fora do domínio não pode vazar o texto original.
 	require.Equal(t, ErrDownloadFailed.Error(), UserMessage(errors.New("exec: \"yt-dlp\": not found")))
+}
+
+// Kwai é reconhecido pela URL, mas o yt-dlp não tem extractor para ele. Deixar
+// o caminho genérico tentar custava dezenas de segundos para terminar em
+// "Unsupported URL" — recusar aqui responde na hora e dizendo qual plataforma é.
+func TestMetadataRecusaPlataformaSemExtractor(t *testing.T) {
+	registry := NewRegistry(&providerFalso{nome: "a", aceita: true, metadata: &Metadata{Title: "nunca"}})
+
+	_, _, err := registry.Metadata(context.Background(),
+		"https://www.kwai.com/@canal/video/123", MetadataOptions{})
+
+	if !errors.Is(err, ErrUnsupportedPlatform) {
+		t.Fatalf("esperado ErrUnsupportedPlatform, obtido %v", err)
+	}
+	if !strings.Contains(UserMessage(err), "suportada") {
+		t.Errorf("a mensagem ao usuário deveria explicar a falta de suporte: %q", UserMessage(err))
+	}
+}
+
+func TestResolveRecusaPlataformaSemExtractor(t *testing.T) {
+	registry := NewRegistry(&providerFalso{nome: "a", aceita: true})
+
+	plataforma, provider, _, err := registry.Resolve("https://www.kwai.com/@canal/video/123")
+
+	if !errors.Is(err, ErrUnsupportedPlatform) {
+		t.Fatalf("esperado ErrUnsupportedPlatform, obtido %v", err)
+	}
+	// A plataforma continua identificada: é o que permite dizer QUAL não é
+	// suportada em vez de um genérico "esta URL não funciona".
+	if plataforma != PlatformKwai {
+		t.Errorf("plataforma esperada %q, obtida %q", PlatformKwai, plataforma)
+	}
+	if provider != nil {
+		t.Error("nenhum provider deveria ser escolhido")
+	}
+}
+
+// As plataformas que têm extractor seguem passando: a recusa acima não pode
+// virar uma peneira que derruba o que funciona.
+func TestPlataformasComSuporteContinuamPassando(t *testing.T) {
+	comSuporte := []Platform{
+		PlatformYouTube, PlatformVimeo, PlatformReddit, PlatformTwitter,
+		PlatformPinterest, PlatformDailymotion, PlatformLinkedIn, PlatformInstagram,
+	}
+	for _, plataforma := range comSuporte {
+		if !plataforma.TemSuporte() {
+			t.Errorf("%s deveria ter suporte", plataforma)
+		}
+	}
+	if PlatformKwai.TemSuporte() {
+		t.Error("Kwai não tem extractor no yt-dlp")
+	}
 }

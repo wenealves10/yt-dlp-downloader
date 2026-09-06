@@ -139,6 +139,16 @@ func sessionPath(accountID uuid.UUID, suffix string) string {
 	return "/internal/sessions/" + url.PathEscape(accountID.String()) + suffix
 }
 
+// comPlataforma anexa a plataforma da conta. O serviço de navegador não tem
+// banco: é por aqui que ele descobre em qual tela de login abrir e quais
+// domínios de cookie pode exportar.
+func comPlataforma(caminho, plataforma string) string {
+	if plataforma == "" {
+		return caminho
+	}
+	return caminho + "?platform=" + url.QueryEscape(plataforma)
+}
+
 // EnsureProfile cria o perfil persistente da conta sem abrir o navegador.
 func (c *Client) EnsureProfile(ctx context.Context, accountID uuid.UUID) (ProfileInfo, error) {
 	var info ProfileInfo
@@ -159,9 +169,9 @@ func (c *Client) DeleteProfile(ctx context.Context, accountID uuid.UUID) error {
 }
 
 // StartSession abre (ou reaproveita) o navegador remoto da conta.
-func (c *Client) StartSession(ctx context.Context, accountID uuid.UUID) (SessionInfo, error) {
+func (c *Client) StartSession(ctx context.Context, accountID uuid.UUID, plataforma string) (SessionInfo, error) {
 	var info SessionInfo
-	response, err := c.do(ctx, http.MethodPost, sessionPath(accountID, "/start"))
+	response, err := c.do(ctx, http.MethodPost, comPlataforma(sessionPath(accountID, "/start"), plataforma))
 	if err != nil {
 		return info, err
 	}
@@ -201,9 +211,9 @@ func (c *Client) Sessions(ctx context.Context) (map[string]SessionInfo, error) {
 }
 
 // Check verifica se a sessão persistida continua autenticada.
-func (c *Client) Check(ctx context.Context, accountID uuid.UUID) (CheckResult, error) {
+func (c *Client) Check(ctx context.Context, accountID uuid.UUID, plataforma string) (CheckResult, error) {
 	var result CheckResult
-	response, err := c.do(ctx, http.MethodPost, sessionPath(accountID, "/check"))
+	response, err := c.do(ctx, http.MethodPost, comPlataforma(sessionPath(accountID, "/check"), plataforma))
 	if err != nil {
 		return result, err
 	}
@@ -213,8 +223,8 @@ func (c *Client) Check(ctx context.Context, accountID uuid.UUID) (CheckResult, e
 // Cookies devolve o jar no formato Netscape. O retorno é material sensível:
 // nunca deve ser logado, devolvido por API pública ou persistido fora de um
 // arquivo temporário com permissão restrita.
-func (c *Client) Cookies(ctx context.Context, accountID uuid.UUID) ([]byte, error) {
-	response, err := c.do(ctx, http.MethodGet, sessionPath(accountID, "/cookies"))
+func (c *Client) Cookies(ctx context.Context, accountID uuid.UUID, plataforma string) ([]byte, error) {
+	response, err := c.do(ctx, http.MethodGet, comPlataforma(sessionPath(accountID, "/cookies"), plataforma))
 	if err != nil {
 		return nil, err
 	}

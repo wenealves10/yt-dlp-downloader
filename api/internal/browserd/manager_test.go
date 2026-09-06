@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/wenealves10/yt-dlp-downloader/internal/browser"
 )
 
 func newTestManager(t *testing.T) *Manager {
@@ -64,7 +65,7 @@ func TestRandomVNCPassword(t *testing.T) {
 func TestChromeArgsSandboxLigado(t *testing.T) {
 	manager := &Manager{cfg: Config{Width: 1440, Height: 900}}
 
-	args := manager.chromeArgs("/data/profiles/abc", 9222)
+	args := manager.chromeArgs("/data/profiles/abc", 9222, browser.PerfilDe("youtube").LoginURL)
 
 	// Com o sandbox ligado não há motivo para desligá-lo nem para silenciar um
 	// aviso que o Chrome não vai emitir.
@@ -79,7 +80,7 @@ func TestChromeArgsSandboxLigado(t *testing.T) {
 func TestChromeArgsSandboxDesligadoSilenciaOAviso(t *testing.T) {
 	manager := &Manager{cfg: Config{Width: 1440, Height: 900, DisableSandbox: true}}
 
-	args := manager.chromeArgs("/data/profiles/abc", 9222)
+	args := manager.chromeArgs("/data/profiles/abc", 9222, browser.PerfilDe("youtube").LoginURL)
 
 	require.Contains(t, args, "--no-sandbox")
 	// Sem --test-type, o Chrome desenha uma faixa amarela no topo de toda
@@ -92,9 +93,20 @@ func TestChromeArgsSandboxDesligadoSilenciaOAviso(t *testing.T) {
 func TestChromeArgsUsaAUrlDeLoginPorUltimo(t *testing.T) {
 	manager := &Manager{cfg: Config{Width: 1440, Height: 900}}
 
-	args := manager.chromeArgs("/data/profiles/abc", 9222)
+	args := manager.chromeArgs("/data/profiles/abc", 9222, browser.PerfilDe("youtube").LoginURL)
 
 	// A URL fecha a lista: qualquer coisa depois dela seria interpretada como
 	// mais um argumento do processo.
-	require.Equal(t, startURL, args[len(args)-1])
+	require.Equal(t, browser.PerfilDe("youtube").LoginURL, args[len(args)-1])
+}
+
+// Cada plataforma abre na SUA tela de login. Abrir sempre no Google deixaria
+// quem cadastrou uma conta do Vimeo olhando para o formulário errado.
+func TestChromeArgsAbreNoLoginDaPlataforma(t *testing.T) {
+	manager := &Manager{cfg: Config{Width: 1440, Height: 900}}
+
+	for _, perfil := range browser.PlataformasSuportadas() {
+		args := manager.chromeArgs("/data/profiles/abc", 9222, perfil.LoginURL)
+		require.Equal(t, perfil.LoginURL, args[len(args)-1], perfil.ID)
+	}
 }

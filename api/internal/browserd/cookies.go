@@ -12,17 +12,14 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/wenealves10/yt-dlp-downloader/internal/browser"
 )
 
-// cookieDomains restringe a exportação ao que o downloader precisa. Cookies de
-// qualquer outro site que o administrador tenha visitado no navegador remoto
-// nunca saem do container.
-var cookieDomains = []string{
-	"youtube.com",
-	"google.com",
-	"googlevideo.com",
-	"ytimg.com",
-}
+// Os domínios exportáveis vêm de browser.PerfilDe: cada plataforma libera só o
+// que o downloader precisa dela. Cookies de qualquer outro site que o
+// administrador tenha visitado no navegador remoto nunca saem do container —
+// inclusive os de OUTRA plataforma gerenciada aqui, que não têm por que vazar
+// para o download de uma terceira.
 
 // cdpCookie espelha o formato do Chrome DevTools Protocol.
 type cdpCookie struct {
@@ -49,22 +46,22 @@ type cdpMessage struct {
 // yt-dlp. Se o navegador já estiver aberto reutiliza a instância; caso
 // contrário sobe um Chrome headless efêmero sobre o mesmo perfil, lê os cookies
 // pelo DevTools e o encerra. O chamador deve tratar o retorno como segredo.
-func (m *Manager) Cookies(ctx context.Context, accountID string) ([]byte, error) {
-	cookies, err := m.readCookies(ctx, accountID)
+func (m *Manager) Cookies(ctx context.Context, accountID, plataforma string) ([]byte, error) {
+	cookies, err := m.readCookies(ctx, accountID, plataforma)
 	if err != nil {
 		return nil, err
 	}
 	return formatNetscape(cookies), nil
 }
 
-func (m *Manager) readCookies(ctx context.Context, accountID string) ([]cdpCookie, error) {
+func (m *Manager) readCookies(ctx context.Context, accountID, plataforma string) ([]cdpCookie, error) {
 	profileDir, err := m.ProfilePath(accountID)
 	if err != nil {
 		return nil, err
 	}
 
 	if port, running := m.runningCDPPort(accountID); running {
-		return fetchCookiesFromCDP(ctx, port)
+		return fetchCookiesFromCDP(ctx, port, plataforma)
 	}
 
 	unlock := m.lockAccount(accountID)
@@ -72,7 +69,7 @@ func (m *Manager) readCookies(ctx context.Context, accountID string) ([]cdpCooki
 
 	// A sessão pode ter sido aberta entre a checagem acima e o lock.
 	if port, running := m.runningCDPPort(accountID); running {
-		return fetchCookiesFromCDP(ctx, port)
+		return fetchCookiesFromCDP(ctx, port, plataforma)
 	}
 
 	if stat, err := os.Stat(profileDir); err != nil || !stat.IsDir() {
@@ -116,12 +113,12 @@ func (m *Manager) readCookies(ctx context.Context, accountID string) ([]cdpCooki
 		return nil, fmt.Errorf("o perfil não ficou disponível: %w", err)
 	}
 
-	return fetchCookiesFromCDP(ctx, port)
+	return fetchCookiesFromCDP(ctx, port, plataforma)
 }
 
 // fetchCookiesFromCDP conversa com o endpoint de browser do DevTools. Storage
 // .getCookies devolve o contexto padrão inteiro, sem precisar navegar.
-func fetchCookiesFromCDP(ctx context.Context, port int) ([]cdpCookie, error) {
+func fetchCookiesFromCDP(ctx context.Context, port int, plataforma string) ([]cdpCookie, error) {
 	endpoint, err := devToolsWebSocketURL(ctx, port)
 	if err != nil {
 		return nil, err
@@ -163,7 +160,7 @@ func fetchCookiesFromCDP(ctx context.Context, port int) ([]cdpCookie, error) {
 		if err := json.Unmarshal(message.Result, &payload); err != nil {
 			return nil, fmt.Errorf("resposta do DevTools inválida: %w", err)
 		}
-		return filterCookies(payload.Cookies), nil
+		return filterCookies(payload.Cookies, plataforma), nil
 	}
 }
 
@@ -192,10 +189,12 @@ func devToolsWebSocketURL(ctx context.Context, port int) (string, error) {
 	return payload.WebSocketDebuggerURL, nil
 }
 
-func filterCookies(cookies []cdpCookie) []cdpCookie {
+func filterCookies(cookies []cdpCookie, plataforma string) []cdpCookie {
+	permitidos := browser.PerfilDe(plataforma).CookieDomains
+
 	filtered := make([]cdpCookie, 0, len(cookies))
 	for _, cookie := range cookies {
-		if matchesCookieDomain(cookie.Domain) {
+		if matchesCookieDomain(cookie.Domain, permitidos) {
 			filtered = append(filtered, cookie)
 		}
 	}
@@ -209,9 +208,9 @@ func filterCookies(cookies []cdpCookie) []cdpCookie {
 	return filtered
 }
 
-func matchesCookieDomain(domain string) bool {
+func matchesCookieDomain(domain string, permitidos []string) bool {
 	host := strings.TrimPrefix(strings.ToLower(domain), ".")
-	for _, allowed := range cookieDomains {
+	for _, allowed := range permitidos {
 		if host == allowed || strings.HasSuffix(host, "."+allowed) {
 			return true
 		}

@@ -58,8 +58,12 @@ type Querier interface {
 	// papel — e é por isso que ela é separada: a rota de perfil do usuário comum
 	// nunca deve conseguir se promover.
 	AdminUpdateUser(ctx context.Context, arg AdminUpdateUserParams) (User, error)
-	// Só cancela o que ainda não terminou: um download já concluído não pode voltar
-	// a CANCELED e sumir do histórico do usuário.
+	// Cancelar é idempotente: o filtro de status está no SET, não no WHERE. Com ele
+	// no WHERE, clicar em cancelar meio segundo depois de o download falhar sozinho
+	// não casava linha nenhuma e a tela cuspia "não pode mais ser cancelado" — um
+	// erro sobre uma corrida que o usuário não provocou nem pode evitar. Agora a
+	// linha sempre volta: quem já terminou apenas mantém o status que tinha, e a
+	// resposta diz qual é.
 	CancelDownload(ctx context.Context, arg CancelDownloadParams) (Download, error)
 	// Reivindica a conta autenticada usada há mais tempo e já registra o uso na
 	// mesma operação, de modo que o rodízio não dependa de um UPDATE posterior.
@@ -69,9 +73,15 @@ type Querier interface {
 	// as contas já descartadas nesta tentativa, o que permite passar para a
 	// próxima quando uma sessão se revela inválida.
 	//
-	// Não é rotação para contornar limites do YouTube: é distribuição justa entre
-	// as contas legítimas do próprio administrador, respeitando a prioridade.
-	ClaimYoutubeAccount(ctx context.Context, exclude []uuid.UUID) (YoutubeAccount, error)
+	// A seleção é por plataforma: a sessão do Vimeo não serve para baixar do
+	// Reddit, e emprestar uma para a outra só gastaria a conta errada.
+	//
+	// Não é rotação para contornar limites da plataforma: é distribuição justa
+	// entre as contas legítimas do próprio administrador, respeitando a prioridade.
+	ClaimYoutubeAccount(ctx context.Context, arg ClaimYoutubeAccountParams) (YoutubeAccount, error)
+	// Quantas contas autenticadas existem por plataforma. É o que a tela de
+	// diagnóstico usa para dizer "o Vimeo precisa de conta e não há nenhuma".
+	CountAuthenticatedAccountsByPlatform(ctx context.Context) ([]CountAuthenticatedAccountsByPlatformRow, error)
 	CountAuthenticatedYoutubeAccounts(ctx context.Context) (int64, error)
 	CountDownloadsByUser(ctx context.Context, userID uuid.UUID) (int64, error)
 	CountDownloadsToday(ctx context.Context, userID uuid.UUID) (int64, error)

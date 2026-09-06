@@ -93,13 +93,24 @@ UPDATE downloads
 SET status = $2, error_message = sqlc.narg('error_message'), finished_at = now()
 WHERE id = $1;
 
--- Só cancela o que ainda não terminou: um download já concluído não pode voltar
--- a CANCELED e sumir do histórico do usuário.
+-- Cancelar é idempotente: o filtro de status está no SET, não no WHERE. Com ele
+-- no WHERE, clicar em cancelar meio segundo depois de o download falhar sozinho
+-- não casava linha nenhuma e a tela cuspia "não pode mais ser cancelado" — um
+-- erro sobre uma corrida que o usuário não provocou nem pode evitar. Agora a
+-- linha sempre volta: quem já terminou apenas mantém o status que tinha, e a
+-- resposta diz qual é.
 -- name: CancelDownload :one
 UPDATE downloads
-SET status = 'CANCELED', finished_at = now()
+SET status = CASE
+      WHEN status IN ('PENDING', 'PROCESSING', 'RETRYING')
+        THEN 'CANCELED'::core.download_status
+      ELSE status
+    END,
+    finished_at = CASE
+      WHEN status IN ('PENDING', 'PROCESSING', 'RETRYING') THEN now()
+      ELSE finished_at
+    END
 WHERE id = $1
   AND user_id = $2
   AND deleted_at IS NULL
-  AND status IN ('PENDING', 'PROCESSING', 'RETRYING')
 RETURNING *;

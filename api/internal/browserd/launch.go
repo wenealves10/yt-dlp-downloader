@@ -17,9 +17,9 @@ import (
 	"github.com/wenealves10/yt-dlp-downloader/internal/browser"
 )
 
-// startURL abre direto na tela de login do Google já apontando o retorno para o
-// YouTube. O administrador digita as credenciais aqui; o sistema nunca as vê.
-const startURL = "https://accounts.google.com/ServiceLogin?continue=https%3A%2F%2Fwww.youtube.com%2F"
+// A URL inicial é a tela de login da própria plataforma, vinda de
+// browser.PerfilDe. O administrador digita as credenciais lá; o sistema nunca
+// as vê.
 
 // vncPasswordAlphabet evita caracteres ambíguos. O protocolo RFB só considera
 // os 8 primeiros bytes da senha, por isso o tamanho fixo.
@@ -31,7 +31,7 @@ const (
 // launch sobe a pilha gráfica da sessão: Xvfb (tela virtual), openbox (foco e
 // decoração de janelas, necessários para os popups do login do Google), Chrome
 // headful e x11vnc.
-func (m *Manager) launch(accountID, profileDir string) (*session, error) {
+func (m *Manager) launch(accountID, profileDir, loginURL string) (*session, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), startupTimeout)
 	defer cancel()
 
@@ -94,7 +94,7 @@ func (m *Manager) launch(accountID, profileDir string) (*session, error) {
 		return nil, fmt.Errorf("não foi possível iniciar o gerenciador de janelas: %w", err)
 	}
 
-	chrome := exec.Command(m.cfg.ChromeBinary, m.chromeArgs(profileDir, cdpPort)...)
+	chrome := exec.Command(m.cfg.ChromeBinary, m.chromeArgs(profileDir, cdpPort, loginURL)...)
 	chrome.Env = env
 	chrome.Stdout, chrome.Stderr = logWriter(accountID, "chrome"), logWriter(accountID, "chrome")
 	if created.chrome, err = startProc(chrome); err != nil {
@@ -146,7 +146,7 @@ func (m *Manager) launch(accountID, profileDir string) (*session, error) {
 	return created, nil
 }
 
-func (m *Manager) chromeArgs(profileDir string, cdpPort int) []string {
+func (m *Manager) chromeArgs(profileDir string, cdpPort int, loginURL string) []string {
 	args := []string{
 		"--user-data-dir=" + profileDir,
 		"--no-first-run",
@@ -185,7 +185,7 @@ func (m *Manager) chromeArgs(profileDir string, cdpPort int) []string {
 		args = append(args, "--user-agent="+m.cfg.UserAgent)
 	}
 
-	return append(args, startURL)
+	return append(args, loginURL)
 }
 
 // allocateDisplay procura um número de display livre, considerando tanto as

@@ -49,6 +49,7 @@ export const YoutubeAccountsPage: React.FC = () => {
 
   const [isFormOpen, setFormOpen] = useState(false);
   const [label, setLabel] = useState("");
+  const [platform, setPlatform] = useState("youtube");
   const [email, setEmail] = useState("");
   const [error, setError] = useState("");
   const [busyAccountID, setBusyAccountID] = useState<string | null>(null);
@@ -58,17 +59,20 @@ export const YoutubeAccountsPage: React.FC = () => {
   const accounts = data?.accounts ?? [];
   const browserAvailable = data?.browser_available ?? false;
   const authenticatedCount = data?.authenticated_count ?? 0;
+  const plataformas = data?.platforms ?? [{ id: "youtube", label: "YouTube" }];
+  const porPlataforma = data?.authenticated_by_platform ?? {};
 
   const handleCreate = (event: React.FormEvent) => {
     event.preventDefault();
     setError("");
 
     createAccount.mutate(
-      { label, email: email || undefined },
+      { label, platform, email: email || undefined },
       {
         onSuccess: () => {
           setLabel("");
           setEmail("");
+          setPlatform("youtube");
           setFormOpen(false);
         },
         onError: (mutationError) => setError(mutationError.message),
@@ -107,7 +111,7 @@ export const YoutubeAccountsPage: React.FC = () => {
 
   return (
     <AdminShell
-      titulo="Contas do YouTube"
+      titulo="Contas das plataformas"
       descricao="Sessões usadas pelo mecanismo de download. O login é feito manualmente no navegador remoto; o sistema nunca guarda a senha da conta."
       acoes={
         <>
@@ -150,12 +154,41 @@ export const YoutubeAccountsPage: React.FC = () => {
                   {authenticatedCount === 1
                     ? "conta autenticada em uso."
                     : "contas autenticadas em rodízio."}{" "}
-                  Cada download escolhe a conta usada há mais tempo. Se o
-                  YouTube recusar uma sessão, ela sai do rodízio na hora e a
-                  próxima conta assume automaticamente.
+                  O rodízio é <strong className="text-gray-100">por
+                  plataforma</strong>: cada download escolhe a conta da própria
+                  plataforma usada há mais tempo — uma sessão do YouTube não
+                  autentica no Vimeo. Se a plataforma recusar uma sessão, ela
+                  sai do rodízio na hora e a próxima conta assume.
                 </>
               )}
             </p>
+          </div>
+        )}
+
+        {accounts.length > 0 && (
+          // Quantas contas cada plataforma tem. É o que responde, sem abrir
+          // log nenhum, "por que o download do Vimeo continua pedindo login?".
+          <div className="mb-6 flex flex-wrap gap-2">
+            {plataformas.map((item) => {
+              const total = porPlataforma[item.id] ?? 0;
+              return (
+                <span
+                  key={item.id}
+                  className={`px-3 py-1 rounded-full text-xs border ${
+                    total > 0
+                      ? "bg-green-600/15 border-green-700/50 text-green-300"
+                      : "bg-gray-800 border-gray-700 text-gray-400"
+                  }`}
+                  title={
+                    total > 0
+                      ? `${total} conta(s) autenticada(s) no ${item.label}`
+                      : `Sem conta autenticada no ${item.label}: os downloads dessa plataforma vão anônimos`
+                  }
+                >
+                  {item.label}: {total}
+                </span>
+              );
+            })}
           </div>
         )}
 
@@ -184,7 +217,26 @@ export const YoutubeAccountsPage: React.FC = () => {
             onSubmit={handleCreate}
             className="mb-6 bg-gray-800 border border-gray-700 rounded-xl p-6 space-y-4"
           >
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-4 sm:grid-cols-3">
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">
+                  Plataforma
+                </label>
+                <select
+                  value={platform}
+                  onChange={(event) => setPlatform(event.target.value)}
+                  className="w-full bg-gray-900 border border-gray-600 rounded-lg py-2.5 px-3 focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all"
+                >
+                  {plataformas.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.label}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-400 mt-1">
+                  Define em qual tela de login o navegador remoto abre.
+                </p>
+              </div>
               <div>
                 <label className="block text-sm text-gray-400 mb-1">
                   Identificação da conta
@@ -279,9 +331,14 @@ export const YoutubeAccountsPage: React.FC = () => {
               >
                 <div className="flex flex-wrap items-start justify-between gap-4">
                   <div className="min-w-0">
-                    <h2 className="text-lg font-semibold text-gray-100 truncate">
-                      {account.label}
-                    </h2>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h2 className="text-lg font-semibold text-gray-100 truncate">
+                        {account.label}
+                      </h2>
+                      <span className="px-2 py-0.5 rounded-full bg-gray-700 text-gray-200 text-xs font-medium">
+                        {account.platform_label || account.platform}
+                      </span>
+                    </div>
                     <p className="text-sm text-gray-400 truncate">
                       {account.email || "E-mail não identificado"}
                     </p>
@@ -291,7 +348,8 @@ export const YoutubeAccountsPage: React.FC = () => {
                       {account.next_in_rotation && (
                         <span className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-0.5 rounded-full bg-gray-700 text-gray-200">
                           <Repeat size={12} />
-                          Próxima do rodízio
+                          Próxima do rodízio no{" "}
+                          {account.platform_label || account.platform}
                         </span>
                       )}
                       {!account.active && (
@@ -328,7 +386,8 @@ export const YoutubeAccountsPage: React.FC = () => {
                   <p className="mt-4 flex items-start gap-2 text-sm text-yellow-300">
                     <AlertTriangle size={16} className="mt-0.5 shrink-0" />
                     <span>
-                      Esta conta precisa ser autenticada novamente.
+                      Esta conta precisa ser autenticada novamente no{" "}
+                      {account.platform_label || account.platform}.
                       {account.last_error && (
                         <span className="text-yellow-500/80">
                           {" "}

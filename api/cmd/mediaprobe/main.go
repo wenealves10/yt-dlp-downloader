@@ -50,7 +50,7 @@ func main() {
 		}
 
 		inicio := time.Now()
-		metadata, _, err := registry.Metadata(ctx, normalizada)
+		metadata, _, err := registry.Metadata(ctx, normalizada, media.MetadataOptions{})
 		decorrido := time.Since(inicio).Round(100 * time.Millisecond)
 
 		if err != nil {

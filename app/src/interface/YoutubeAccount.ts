@@ -16,6 +16,11 @@ export type BrowserState = "STOPPED" | "STARTING" | "RUNNING" | "ERROR";
 export interface YoutubeAccount {
   id: string;
   label: string;
+  // A plataforma decide em qual tela de login o navegador remoto abre e quais
+  // downloads podem usar esta sessão. Uma conta do YouTube não autentica no
+  // Vimeo.
+  platform: string;
+  platform_label: string;
   email?: string;
   status: YoutubeAccountStatus;
   browser_state: BrowserState;
@@ -33,11 +38,21 @@ export interface YoutubeAccount {
   created_at: string;
 }
 
+export interface PlataformaDeConta {
+  id: string;
+  label: string;
+}
+
 export interface YoutubeAccountsResponse {
   accounts: YoutubeAccount[];
   browser_available: boolean;
   // Quantas contas o rodízio tem disponíveis neste momento.
   authenticated_count: number;
+  // Plataformas que aceitam conta gerenciada, para o formulário de cadastro.
+  platforms?: PlataformaDeConta[];
+  // Contas autenticadas por plataforma. É o que responde "por que o download
+  // do Vimeo continua pedindo login?".
+  authenticated_by_platform?: Record<string, number>;
 }
 
 // Credenciais efêmeras para abrir o canal do navegador remoto. O ticket é de

@@ -21,15 +21,19 @@ import (
 	"github.com/wenealves10/yt-dlp-downloader/internal/db"
 )
 
-// ErrNoAccount indica que não há conta gerenciada autenticada disponível. Não é
-// uma falha: o download segue com a configuração estática de cookies.
-var ErrNoAccount = errors.New("nenhuma conta do YouTube autenticada disponível")
+// ErrNoAccount indica que não há conta gerenciada autenticada disponível para
+// a plataforma. Não é uma falha: o download segue com a configuração estática
+// de cookies, que basta para a maioria dos conteúdos públicos.
+var ErrNoAccount = errors.New("nenhuma conta autenticada disponível para esta plataforma")
 
 // Lease é o empréstimo de uma sessão autenticada. O arquivo apontado por
 // CookieFile existe apenas enquanto o lease estiver aberto.
 type Lease struct {
 	AccountID uuid.UUID
 	Label     string
+	// Plataforma é a de onde a sessão veio. Guardada porque um lease do Vimeo
+	// devolvido como falho não pode marcar uma conta do YouTube.
+	Plataforma string
 
 	// CookieFile é um arquivo 0600 dentro de um diretório temporário 0700,
 	// destruído no Release.
@@ -58,7 +62,9 @@ func (l *Lease) Release() {
 // Provider entrega sessões autenticadas ao downloader e recebe de volta o
 // veredito de quem usou a sessão, para que uma conta reprovada saia do rodízio.
 type Provider interface {
-	Acquire(ctx context.Context) (*Lease, error)
+	// Acquire pede uma sessão da plataforma do conteúdo. Uma conta do YouTube
+	// não autentica no Vimeo, então a plataforma faz parte do pedido.
+	Acquire(ctx context.Context, plataforma string) (*Lease, error)
 	ReportAuthFailure(ctx context.Context, lease *Lease, reason string)
 }
 
@@ -85,21 +91,31 @@ const maxAcquireAttempts = 5
 // Quando a sessão escolhida se revela inválida, a conta é marcada e a próxima
 // é tentada na mesma chamada, de modo que um cookie expirado não derruba o
 // download enquanto houver outra conta funcionando.
-func (m *Manager) Acquire(ctx context.Context) (*Lease, error) {
+func (m *Manager) Acquire(ctx context.Context, plataforma string) (*Lease, error) {
 	if m == nil || m.store == nil || !m.client.Configured() {
+		return nil, ErrNoAccount
+	}
+
+	// Uma plataforma sem perfil de login não tem como ter conta gerenciada;
+	// procurar no banco só gastaria uma consulta para achar nada.
+	if !browser.PlataformaSuportada(plataforma) {
 		return nil, ErrNoAccount
 	}
 
 	tried := make([]uuid.UUID, 0, maxAcquireAttempts)
 
 	for attempt := 0; attempt < maxAcquireAttempts; attempt++ {
-		account, err := m.store.ClaimYoutubeAccount(ctx, tried)
+		account, err := m.store.ClaimYoutubeAccount(ctx, db.ClaimYoutubeAccountParams{
+			TargetPlatform: plataforma,
+			Exclude:        tried,
+		})
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				// Sem mais contas elegíveis. Se alguma foi tentada e falhou, o
 				// erro dela é mais informativo do que "nenhuma conta".
 				if len(tried) > 0 {
-					return nil, fmt.Errorf("nenhuma conta do YouTube utilizável: %d tentada(s) sem sucesso", len(tried))
+					return nil, fmt.Errorf("nenhuma conta de %s utilizável: %d tentada(s) sem sucesso",
+						browser.PerfilDe(plataforma).Label, len(tried))
 				}
 				return nil, ErrNoAccount
 			}
@@ -119,21 +135,24 @@ func (m *Manager) Acquire(ctx context.Context) (*Lease, error) {
 		return lease, nil
 	}
 
-	return nil, fmt.Errorf("nenhuma conta do YouTube utilizável após %d tentativas", maxAcquireAttempts)
+	return nil, fmt.Errorf("nenhuma conta de %s utilizável após %d tentativas",
+		browser.PerfilDe(plataforma).Label, maxAcquireAttempts)
 }
 
 // leaseFor busca os cookies da conta e grava o arquivo temporário. Uma sessão
 // sem os cookies do Google é rejeitada aqui, sem gastar uma requisição ao
 // YouTube: é o caso mais comum de conta deslogada.
 func (m *Manager) leaseFor(ctx context.Context, account db.YoutubeAccount) (*Lease, error) {
-	jar, err := m.client.Cookies(ctx, account.ID)
+	perfil := browser.PerfilDe(account.Platform)
+
+	jar, err := m.client.Cookies(ctx, account.ID, account.Platform)
 	if err != nil {
 		m.markUnavailable(ctx, account, err)
 		return nil, err
 	}
 
-	if browser.CountSessionCookies(jar) == 0 {
-		reason := errors.New("o perfil não possui cookies de sessão do Google")
+	if browser.CountSessionCookies(account.Platform, jar) == 0 {
+		reason := fmt.Errorf("o perfil não possui cookies de sessão do %s", perfil.Label)
 		m.markUnavailable(ctx, account, reason)
 		return nil, reason
 	}
@@ -156,6 +175,7 @@ func (m *Manager) leaseFor(ctx context.Context, account db.YoutubeAccount) (*Lea
 	return &Lease{
 		AccountID:  account.ID,
 		Label:      account.Label,
+		Plataforma: account.Platform,
 		CookieFile: cookieFile,
 		tempDir:    tempDir,
 	}, nil
@@ -170,7 +190,8 @@ func (m *Manager) ReportAuthFailure(ctx context.Context, lease *Lease, reason st
 		return
 	}
 
-	log.Printf("ytaccounts: sessão rejeitada pelo YouTube account_id=%s label=%s", lease.AccountID, lease.Label)
+	log.Printf("ytaccounts: sessão rejeitada pela plataforma account_id=%s label=%s plataforma=%s",
+		lease.AccountID, lease.Label, lease.Plataforma)
 
 	if _, err := m.store.UpdateYoutubeAccountStatus(ctx, db.UpdateYoutubeAccountStatusParams{
 		ID:        lease.AccountID,
@@ -240,12 +261,12 @@ func AuthArgs(lease *Lease) []string {
 
 // Acquire é o atalho usado pelos jobs: devolve o lease quando existe uma conta
 // autenticada e nil quando não existe, sem transformar a ausência em erro.
-func Acquire(ctx context.Context, provider Provider) *Lease {
+func Acquire(ctx context.Context, provider Provider, plataforma string) *Lease {
 	if provider == nil {
 		return nil
 	}
 
-	lease, err := provider.Acquire(ctx)
+	lease, err := provider.Acquire(ctx, plataforma)
 	if err != nil {
 		if !errors.Is(err, ErrNoAccount) {
 			log.Printf("ytaccounts: seguindo sem conta gerenciada: %v", err)
@@ -269,6 +290,14 @@ var authFailureMarkers = []string{
 	"sign in to confirm your age",
 	"please sign in",
 	"--cookies for the authentication",
+	// As outras plataformas dizem a mesma coisa com outras palavras. Sem
+	// reconhecê-las, uma sessão expirada do Vimeo ficaria no rodízio para
+	// sempre, falhando todo download que a pegasse.
+	"only works when logged-in",
+	"login required",
+	"you must be logged in",
+	"requires authentication",
+	"log in to view",
 }
 
 // IsAuthFailure informa se a saída do yt-dlp indica sessão recusada.
@@ -283,7 +312,7 @@ func AuthFailureReason(output []byte) string {
 	if line == "" {
 		return ""
 	}
-	return "o YouTube recusou a sessão: " + line
+	return "a plataforma recusou a sessão: " + line
 }
 
 func authFailureLine(output []byte) string {

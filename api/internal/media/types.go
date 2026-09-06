@@ -88,6 +88,12 @@ type Request struct {
 	// CookieFile é opcional e, quando presente, é um arquivo temporário de
 	// sessão. O provider nunca deve copiá-lo nem registrá-lo em log.
 	CookieFile string
+	// ExpectedBytes é o tamanho estimado do conteúdo inteiro, somando as faixas
+	// que serão baixadas. Serve só para o progresso: com vídeo e áudio
+	// separados, é o que dá um denominador estável para a barra em vez de ela
+	// reiniciar a cada faixa. Zero significa desconhecido, e o provider se
+	// vira com o que descobrir durante o download.
+	ExpectedBytes int64
 }
 
 // Result descreve o arquivo produzido.

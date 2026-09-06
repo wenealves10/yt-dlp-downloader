@@ -66,15 +66,22 @@ func (f formatoJSON) temAudio() bool {
 }
 
 // Metadata resolve o conteúdo sem baixá-lo.
-func (p *Provider) Metadata(ctx context.Context, parsed *url.URL) (*media.Metadata, error) {
+func (p *Provider) Metadata(ctx context.Context, parsed *url.URL, opts media.MetadataOptions) (*media.Metadata, error) {
 	args := p.argsBase()
 	args = append(args,
 		"--dump-single-json",
 		"--no-playlist",
 		"--skip-download",
-		"--",
-		parsed.String(),
 	)
+
+	// Vimeo recusa a própria leitura de metadados sem sessão ("the web client
+	// only works when logged-in"); resolver sem os cookies falharia antes de o
+	// usuário chegar a escolher a qualidade.
+	if opts.CookieFile != "" {
+		args = append(args, "--cookies", opts.CookieFile)
+	}
+
+	args = append(args, "--", parsed.String())
 
 	var bruto strings.Builder
 	stderr, err := p.runner.executar(ctx, args, func(linha string) {

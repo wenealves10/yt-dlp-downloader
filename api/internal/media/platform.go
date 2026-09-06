@@ -120,6 +120,24 @@ func PlatformFor(parsed *url.URL) Platform {
 	return PlatformUnknown
 }
 
+// semExtractor lista as plataformas que o mecanismo reconhece pela URL mas não
+// sabe baixar: não existe extractor para elas, e o caminho genérico só descobre
+// isso depois de buscar a página e falhar.
+//
+// Recusar cedo troca uma espera de dezenas de segundos terminando em erro
+// obscuro por uma resposta imediata e honesta. A lista fica aqui, junto do
+// resto do que se sabe sobre a plataforma.
+var semExtractor = map[Platform]bool{
+	PlatformKwai: true,
+}
+
+// TemSuporte informa se vale a pena sequer tentar. Uma plataforma sem suporte
+// continua sendo reconhecida — é isso que permite dizer QUAL plataforma não é
+// suportada, em vez de "esta URL não funciona".
+func (p Platform) TemSuporte() bool {
+	return !semExtractor[p]
+}
+
 // KnownPlatforms lista as plataformas com rótulo próprio, para o painel
 // administrativo. Não é a lista do que o yt-dlp consegue baixar — essa é bem
 // maior e cresce a cada versão dele.

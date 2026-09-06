@@ -105,8 +105,20 @@ func (s *Server) getSession(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, info)
 }
 
+// plataformaDa lê a plataforma da conta da query. O banco é a fonte da verdade
+// e fica do outro lado (na API), então ela viaja no pedido. Ausente cai no
+// padrão: durante um deploy em etapas a API antiga ainda chama sem o parâmetro,
+// e todas as contas dela são do YouTube.
+func plataformaDa(ctx *gin.Context) string {
+	plataforma := ctx.Query("platform")
+	if !browser.PlataformaSuportada(plataforma) {
+		return browser.PlataformaPadrao
+	}
+	return plataforma
+}
+
 func (s *Server) startSession(ctx *gin.Context) {
-	info, err := s.manager.Start(ctx.Param("id"))
+	info, err := s.manager.Start(ctx.Param("id"), plataformaDa(ctx))
 	if err != nil {
 		respondError(ctx, err)
 		return
@@ -151,7 +163,7 @@ func (s *Server) checkSession(ctx *gin.Context) {
 	requestCtx, cancel := context.WithTimeout(ctx.Request.Context(), 90*time.Second)
 	defer cancel()
 
-	result, err := s.manager.Check(requestCtx, ctx.Param("id"))
+	result, err := s.manager.Check(requestCtx, ctx.Param("id"), plataformaDa(ctx))
 	if err != nil {
 		respondError(ctx, err)
 		return
@@ -165,7 +177,7 @@ func (s *Server) sessionCookies(ctx *gin.Context) {
 	requestCtx, cancel := context.WithTimeout(ctx.Request.Context(), 90*time.Second)
 	defer cancel()
 
-	jar, err := s.manager.Cookies(requestCtx, ctx.Param("id"))
+	jar, err := s.manager.Cookies(requestCtx, ctx.Param("id"), plataformaDa(ctx))
 	if err != nil {
 		respondError(ctx, err)
 		return

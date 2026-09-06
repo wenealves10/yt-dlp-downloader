@@ -16,7 +16,7 @@ import type { DownloadProgress } from "../../interface/Media";
 interface Job {
   id: string;
   title?: string;
-  status: "queue" | "processing" | "complete" | "expired" | "error";
+  status: "queue" | "processing" | "complete" | "expired" | "error" | "canceled";
   format: string;
   thumbnail?: string;
   completedAt?: number;

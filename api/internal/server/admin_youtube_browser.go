@@ -52,7 +52,8 @@ func (s *Server) openYoutubeBrowser(ctx *gin.Context) {
 	requestCtx, cancel := context.WithTimeout(ctx.Request.Context(), browserOperationTimeout)
 	defer cancel()
 
-	session, err := s.browser.StartSession(requestCtx, accountID)
+	// A plataforma da conta define em qual tela de login o navegador abre.
+	session, err := s.browser.StartSession(requestCtx, accountID, account.Platform)
 	if err != nil {
 		log.Printf("admin: falha ao abrir navegador account_id=%s: %v", accountID, err)
 		switch {

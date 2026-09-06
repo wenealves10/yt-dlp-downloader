@@ -22,7 +22,7 @@ type Provider interface {
 	CanHandle(parsed *url.URL) bool
 
 	// Metadata resolve o conteúdo sem baixá-lo.
-	Metadata(ctx context.Context, parsed *url.URL) (*Metadata, error)
+	Metadata(ctx context.Context, parsed *url.URL, opts MetadataOptions) (*Metadata, error)
 
 	// Download escreve o arquivo em req.OutputDir. Cancelar o ctx encerra o
 	// trabalho e o processo filho.
@@ -30,6 +30,16 @@ type Provider interface {
 
 	// Health verifica se o provider e suas dependências estão utilizáveis.
 	Health(ctx context.Context) Health
+}
+
+// MetadataOptions carrega o que é opcional na resolução. Existe como struct
+// para acrescentar um campo não virar mudança de assinatura em toda
+// implementação de Provider.
+type MetadataOptions struct {
+	// CookieFile é um arquivo temporário de sessão. Algumas plataformas — o
+	// Vimeo é o caso claro — recusam até a LEITURA de metadados sem sessão, e
+	// não só o download. O provider nunca deve copiá-lo nem registrá-lo em log.
+	CookieFile string
 }
 
 // Registry escolhe o provider de cada URL e é o ponto único de extensão: somar
@@ -68,12 +78,20 @@ func (r *Registry) Resolve(bruta string) (Platform, Provider, string, error) {
 		return PlatformUnknown, nil, "", err
 	}
 
-	aceitos := r.candidatos(parsed)
-	if len(aceitos) == 0 {
-		return PlatformFor(parsed), nil, normalizada, wrap(ErrUnsupportedPlatform, parsed.Hostname())
+	plataforma := PlatformFor(parsed)
+	if !plataforma.TemSuporte() {
+		return plataforma, nil, normalizada, &Error{
+			Kind:   ErrUnsupportedPlatform,
+			Detail: plataforma.Label() + " não é suportado pelo mecanismo de download",
+		}
 	}
 
-	return PlatformFor(parsed), aceitos[0], normalizada, nil
+	aceitos := r.candidatos(parsed)
+	if len(aceitos) == 0 {
+		return plataforma, nil, normalizada, wrap(ErrUnsupportedPlatform, parsed.Hostname())
+	}
+
+	return plataforma, aceitos[0], normalizada, nil
 }
 
 // Metadata resolve o conteúdo, tentando os providers em ordem. O fallback é
@@ -83,10 +101,20 @@ func (r *Registry) Resolve(bruta string) (Platform, Provider, string, error) {
 // Erros que descrevem o CONTEÚDO (privado, indisponível, ao vivo) não disparam
 // fallback: o próximo provider chegaria à mesma conclusão, e insistir só
 // gastaria tempo e requisições contra a plataforma.
-func (r *Registry) Metadata(ctx context.Context, bruta string) (*Metadata, string, error) {
+func (r *Registry) Metadata(ctx context.Context, bruta string, opts MetadataOptions) (*Metadata, string, error) {
 	normalizada, parsed, err := NormalizeURL(bruta)
 	if err != nil {
 		return nil, "", err
+	}
+
+	if plataforma := PlatformFor(parsed); !plataforma.TemSuporte() {
+		// Reconhecida, mas sem extractor. Sem esta checagem o caminho genérico
+		// baixaria a página e só então falharia — dezenas de segundos para
+		// chegar à mesma conclusão que já se sabe aqui.
+		return nil, normalizada, &Error{
+			Kind:   ErrUnsupportedPlatform,
+			Detail: plataforma.Label() + " não é suportado pelo mecanismo de download",
+		}
 	}
 
 	aceitos := r.candidatos(parsed)
@@ -96,7 +124,7 @@ func (r *Registry) Metadata(ctx context.Context, bruta string) (*Metadata, strin
 
 	var ultimoErro error
 	for indice, provider := range aceitos {
-		metadata, err := provider.Metadata(ctx, parsed)
+		metadata, err := provider.Metadata(ctx, parsed, opts)
 		if err == nil {
 			metadata.Platform = PlatformFor(parsed)
 			metadata.Provider = provider.Name()

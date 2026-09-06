@@ -30,6 +30,12 @@ ARG YT_DLP_VERSION=2026.8.19
 # ler metadados; quem baixa, junta vídeo com áudio e converte para MP3 é o
 # worker, e é o Dockerfile.worker que traz o ffmpeg. Instalá-lo nesta imagem
 # somaria centenas de MB a um binário que este processo nunca chama.
+#
+# O extra "curl-cffi" habilita a impersonação de navegador: sem ele o Dailymotion
+# recusa o m3u8 ("none of these impersonate targets are available") e o Vimeo
+# avisa antes de falhar. As duas exigem o TLS fingerprint de um navegador real,
+# que o cliente HTTP padrão do Python não tem como imitar. Há wheel aarch64
+# publicada, então nada é compilado no build do servidor ARM.
 RUN apt-get update && apt-get install -y \
     python3 \
     python3-venv \
@@ -38,7 +44,7 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     && python3 -m venv /opt/venv \
     && /opt/venv/bin/pip install --upgrade pip \
-    && /opt/venv/bin/pip install "yt-dlp[default]==${YT_DLP_VERSION}" \
+    && /opt/venv/bin/pip install "yt-dlp[default,curl-cffi]==${YT_DLP_VERSION}" \
     && /opt/venv/bin/yt-dlp --version \
     && rm -rf /var/lib/apt/lists/*
 

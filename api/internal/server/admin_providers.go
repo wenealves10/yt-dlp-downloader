@@ -52,6 +52,11 @@ func (s *Server) listProviders(ctx *gin.Context) {
 		plataformas = append(plataformas, gin.H{
 			"id":    string(plataforma),
 			"label": plataforma.Label(),
+			// Reconhecida não é o mesmo que baixável: o Kwai é identificado
+			// pela URL e recusado na hora, porque não existe extractor para
+			// ele. Listar os dois casos igual faria a tela prometer o que não
+			// entrega.
+			"supported": plataforma.TemSuporte(),
 		})
 	}
 

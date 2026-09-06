@@ -200,17 +200,61 @@ O comando nunca é montado por concatenação: os argumentos vão estruturados p
 `exec`, sem shell, e `--` separa as opções da URL. O `format_id` e o nome do
 arquivo passam por expressão regular antes de virarem argumento.
 
-### Progresso e cancelamento
+### Progresso
 
 O progresso sai do `--progress-template` do yt-dlp com um prefixo próprio,
 trafega por SSE (o mesmo Redis Stream do resto) e é gravado no banco a cada 10 s
 — só o suficiente para a tela reabrir no meio de um download.
 
-O cancelamento marca no banco e grava uma chave no Redis. O worker observa essa
-chave a cada 2 s **independente do progresso**: um download que está resolvendo
-ou pós-processando não emite atualização, e depender do callback deixaria esses
-momentos sem resposta. O processo roda em grupo próprio (`Setpgid`), então o
-SIGKILL alcança o ffmpeg junto — sem isso ficaria um órfão escrevendo em disco.
+**O yt-dlp reporta por FAIXA, não por download.** Acima de 720p vídeo e áudio
+vêm separados, e ele baixa um de cada vez reiniciando a contagem: a barra subia
+até o fim, voltava para zero e subia de novo. `internal/media/ytdlp/progresso.go`
+agrega as faixas em um progresso único:
+
+- o id do formato (`%(info.format_id)s` no template) marca a troca de faixa; sem
+  ele, a contagem voltando para trás é o sinal de reserva;
+- os bytes das faixas concluídas continuam contando, então o numerador só cresce;
+- o denominador é o tamanho estimado do conteúdo inteiro — vídeo **mais** a
+  faixa de áudio que será somada a ele (`tamanhoEstimado`, gravado em
+  `total_bytes` na criação). Sem isso a barra travaria perto do fim;
+- há trava para trás: se a estimativa era curta e o total cresce no meio, o
+  percentual segura em vez de cair;
+- a fase de download para em 99%. Os 100% pertencem ao desfecho do job, depois
+  da junção das faixas — anunciá-los antes é o que fazia a barra parecer
+  concluída e então recomeçar.
+
+A tela mostra percentual e bytes, e só. Velocidade e ETA são medidos por faixa e
+reiniciavam junto, contradizendo a barra.
+
+### Cancelamento
+
+Cancelar **nunca falha por corrida de status**. O filtro de status vive no `SET`
+da query, não no `WHERE`: clicar em cancelar meio segundo depois de o download
+falhar sozinho antes devolvia 409 e a tela cuspia "este download não pode mais
+ser cancelado" — um erro sobre algo que o usuário não provocou nem podia evitar.
+Agora a linha sempre volta, quem já terminou mantém o status que tinha, e 404
+fica reservado para um id que não é daquele usuário.
+
+O pedido grava uma chave no Redis **antes** do UPDATE — gravar depois abriria
+uma janela em que o download consta cancelado e segue baixando. O worker observa
+essa chave a cada 2 s **independente do progresso**: um download que está
+resolvendo ou pós-processando não emite atualização, e depender do callback
+deixaria esses momentos sem resposta. O processo roda em grupo próprio
+(`Setpgid`), então o SIGKILL alcança o ffmpeg junto — sem isso ficaria um órfão
+escrevendo em disco.
+
+E cancelar não deixa sobra:
+
+| Momento do cancelamento | O que acontece |
+| --- | --- |
+| Na fila | O job vê `CANCELED` e nem começa |
+| Baixando | Contexto cancelado, grupo de processos morto, diretório temporário removido |
+| Entre o fim do download e o upload | Nova checagem antes de encaminhar; arquivo descartado |
+| Upload na fila | O job de upload verifica o status, apaga os arquivos locais e não sobe nada |
+
+A API publica o evento `CANCELED` na hora, sem esperar o worker perceber, e a
+tela marca o card otimisticamente — 2 s com o botão ainda aceso pareciam clique
+perdido.
 
 ### Arquivos temporários
 
@@ -265,6 +309,22 @@ go run ./cmd/mediaprobe health
 go run ./cmd/mediaprobe "https://youtu.be/..." "https://vimeo.com/..."
 go run ./cmd/mediaprobe download "https://youtu.be/..." "137" 5s
 ```
+
+### Suporte por plataforma
+
+Reconhecer a URL e conseguir baixar são coisas diferentes:
+
+| Situação | Exemplos | O que acontece |
+| --- | --- | --- |
+| Funciona anônimo | YouTube, TikTok, LinkedIn, Twitch | Baixa direto |
+| Precisa de impersonação | Dailymotion, Vimeo | O extra `curl-cffi` do yt-dlp entrega o TLS fingerprint de navegador que essas plataformas exigem. Sem ele: `none of these impersonate targets are available` |
+| Precisa de conta | Vimeo (sempre), Pinterest / Reddit / X (do IP do datacenter) | Cadastre a conta da plataforma no painel |
+| Sem extractor | Kwai | Recusado na hora, dizendo o nome da plataforma |
+
+O Kwai é reconhecido pela URL, mas o yt-dlp não tem extractor para ele. Deixar o
+caminho genérico tentar custava dezenas de segundos para terminar em
+`Unsupported URL`; `Platform.TemSuporte()` recusa antes de sair da máquina, e o
+painel de providers mostra essas plataformas riscadas.
 
 ### Compatibilidade
 
@@ -326,19 +386,44 @@ edição.
   super admin ativo — isso trancaria todo mundo para fora do painel, e não há
   tela para desfazer.
 
-## 🔐 Contas do YouTube (painel de Super Admin)
+## 🔐 Contas das plataformas (painel de Super Admin)
 
-O downloader pode usar sessões autenticadas de contas do YouTube controladas
-pelo administrador, em vez de um arquivo de cookies mantido à mão. O login é
-sempre **manual**: o sistema abre um navegador remoto, o Super Admin entra na
-conta e a sessão fica salva no perfil persistente do Chrome. **Nenhuma senha é
-pedida, exibida ou armazenada.**
+O downloader pode usar sessões autenticadas de contas controladas pelo
+administrador, em vez de um arquivo de cookies mantido à mão. O login é sempre
+**manual**: o sistema abre um navegador remoto, o Super Admin entra na conta e a
+sessão fica salva no perfil persistente do Chrome. **Nenhuma senha é pedida,
+exibida ou armazenada.**
+
+### Por que não é só do YouTube
+
+Duas coisas diferentes levam à mesma solução:
+
+- **Plataformas que exigem login por natureza.** O Vimeo recusa até a *leitura*
+  de metadados sem sessão: `the web client only works when logged-in`.
+- **Plataformas que atendem o IP residencial e bloqueiam o do datacenter.**
+  Pinterest, Reddit e X resolvem normalmente de uma máquina doméstica e são
+  recusados no servidor. A conta é o que devolve o acesso.
+
+Cada plataforma tem um perfil em `internal/browser/plataformas.go`: a tela de
+login que o navegador abre, os domínios de cookie que podem sair do container,
+os nomes que indicam sessão logada e se a *resolução* também precisa de conta.
+Os cookies **nunca vazam entre plataformas** — a sessão do Vimeo não leva junto
+os do Google.
+
+O rodízio é **por plataforma**: uma conta do YouTube não autentica no Vimeo, e
+emprestá-la só gastaria a conta errada.
+
+Buscar cookies pode subir um Chrome headless sobre o perfil, e a resolução roda
+dentro da requisição de quem colou o link. Por isso ela só empresta sessão onde
+resolver anônimo comprovadamente falha (`MetadadosExigemSessao`); o YouTube
+resolve bem sem conta e não paga esse custo. O download sempre usa a conta,
+quando existe.
 
 ### Fluxo
 
 ```
-Super Admin → YouTube → Contas → Adicionar conta → Abrir navegador
-   → login manual no Google
+Super Admin → Contas → Adicionar conta (escolhe a plataforma) → Abrir navegador
+   → login manual na plataforma
    → o painel detecta a sessão sozinho e marca "Autenticada"
    → fechar navegador → sessão persistida no perfil
    → downloads passam a usar a sessão
@@ -413,6 +498,8 @@ UPDATE ... WHERE id = (SELECT ... ORDER BY priority, last_used_at NULLS FIRST
                        LIMIT 1 FOR UPDATE SKIP LOCKED)
 ```
 
+- **Escopo:** a seleção filtra por plataforma. A sessão do Vimeo não serve para
+  baixar do Reddit.
 - **Rodízio:** vence a conta usada há mais tempo, então o uso se distribui
   sozinho. `priority` (menor = preferida) permite manter uma conta principal e
   outras de reserva; com prioridades iguais o rodízio é circular.

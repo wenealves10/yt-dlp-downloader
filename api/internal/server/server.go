@@ -16,6 +16,7 @@ import (
 	"github.com/wenealves10/yt-dlp-downloader/internal/configs"
 	"github.com/wenealves10/yt-dlp-downloader/internal/db"
 	"github.com/wenealves10/yt-dlp-downloader/internal/libs/storage"
+	"github.com/wenealves10/yt-dlp-downloader/internal/libs/stream"
 	"github.com/wenealves10/yt-dlp-downloader/internal/media"
 	"github.com/wenealves10/yt-dlp-downloader/internal/tokens"
 	"github.com/wenealves10/yt-dlp-downloader/internal/ytaccounts"
@@ -33,7 +34,11 @@ type Server struct {
 	browser       *browser.Client
 	mediaRegistry *media.Registry
 	accounts      ytaccounts.Provider
-	router        *gin.Engine
+	// rdStream deixa a API publicar no mesmo stream que o worker usa. É o que
+	// permite o cancelamento aparecer na tela na hora, sem esperar o worker
+	// notar o pedido.
+	rdStream stream.EventPublisher
+	router   *gin.Engine
 }
 
 func NewServer(
@@ -64,6 +69,10 @@ func NewServer(
 		browser:       browserClient,
 		accounts:      accounts,
 		mediaRegistry: mediaRegistry,
+	}
+
+	if redisClient != nil {
+		server.rdStream = stream.NewRedisPublisher(redisClient)
 	}
 
 	if v, ok := binding.Validator.Engine().(*validator.Validate); ok {

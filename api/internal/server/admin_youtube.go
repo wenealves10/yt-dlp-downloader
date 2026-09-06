@@ -24,8 +24,12 @@ const browserOperationTimeout = 90 * time.Second
 // existe nenhum campo de cookie, token ou senha: o front nunca vê material de
 // sessão.
 type youtubeAccountResponse struct {
-	ID                  string     `json:"id"`
-	Label               string     `json:"label"`
+	ID    string `json:"id"`
+	Label string `json:"label"`
+	// Platform é o que decide em qual login o navegador remoto abre e quais
+	// downloads podem usar esta sessão.
+	Platform            string     `json:"platform"`
+	PlatformLabel       string     `json:"platform_label"`
 	Email               string     `json:"email,omitempty"`
 	Status              string     `json:"status"`
 	BrowserState        string     `json:"browser_state"`
@@ -44,9 +48,13 @@ type youtubeAccountResponse struct {
 }
 
 func newYoutubeAccountResponse(account db.YoutubeAccount, session browser.SessionInfo) youtubeAccountResponse {
+	perfil := browser.PerfilDe(account.Platform)
+
 	response := youtubeAccountResponse{
 		ID:                account.ID.String(),
 		Label:             account.Label,
+		Platform:          perfil.ID,
+		PlatformLabel:     perfil.Label,
 		Email:             account.Email.String,
 		Status:            string(account.Status),
 		BrowserState:      string(browser.SessionStateStopped),
@@ -164,10 +172,31 @@ func (s *Server) listYoutubeAccounts(ctx *gin.Context) {
 		log.Printf("admin: falha ao contar contas autenticadas: %v", err)
 	}
 
+	plataformas := make([]gin.H, 0)
+	for _, perfil := range browser.PlataformasSuportadas() {
+		plataformas = append(plataformas, gin.H{
+			"id":    perfil.ID,
+			"label": perfil.Label,
+		})
+	}
+
+	// Quantas contas cada plataforma tem à disposição. É o que responde
+	// "por que o download do Vimeo continua pedindo login?".
+	porPlataforma := gin.H{}
+	if linhas, err := s.store.CountAuthenticatedAccountsByPlatform(ctx.Request.Context()); err != nil {
+		log.Printf("admin: falha ao contar contas por plataforma: %v", err)
+	} else {
+		for _, linha := range linhas {
+			porPlataforma[linha.Platform] = linha.Total
+		}
+	}
+
 	ctx.JSON(http.StatusOK, gin.H{
-		"accounts":            response,
-		"browser_available":   browserAvailable,
-		"authenticated_count": authenticated,
+		"accounts":                  response,
+		"browser_available":         browserAvailable,
+		"authenticated_count":       authenticated,
+		"platforms":                 plataformas,
+		"authenticated_by_platform": porPlataforma,
 	})
 }
 
@@ -186,7 +215,10 @@ func (s *Server) getYoutubeAccount(ctx *gin.Context) {
 }
 
 type createYoutubeAccountRequest struct {
-	Label    string `json:"label" binding:"required,min=2,max=80"`
+	Label string `json:"label" binding:"required,min=2,max=80"`
+	// Platform vazio vira YouTube: é o comportamento de antes desta versão, e
+	// nenhum cliente antigo manda o campo.
+	Platform string `json:"platform" binding:"omitempty,max=40"`
 	Email    string `json:"email" binding:"omitempty,email"`
 	Priority int32  `json:"priority" binding:"omitempty,min=1,max=1000"`
 }
@@ -201,6 +233,18 @@ func (s *Server) createYoutubeAccount(ctx *gin.Context) {
 	var req createYoutubeAccountRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		ctx.JSON(http.StatusBadRequest, errorResponse(err))
+		return
+	}
+
+	plataforma := req.Platform
+	if plataforma == "" {
+		plataforma = browser.PlataformaPadrao
+	}
+	if !browser.PlataformaSuportada(plataforma) {
+		// Aceitar uma plataforma sem perfil de login criaria uma conta que
+		// ninguém saberia autenticar nem de onde exportar cookies.
+		ctx.JSON(http.StatusBadRequest,
+			errorResponse(errors.New("não há suporte a contas gerenciadas nesta plataforma")))
 		return
 	}
 
@@ -227,6 +271,7 @@ func (s *Server) createYoutubeAccount(ctx *gin.Context) {
 		ProfileDir: accountID.String(),
 		Priority:   priority,
 		CreatedBy:  db.ToPgUUID(user.ID),
+		Platform:   plataforma,
 	})
 	if err != nil {
 		// O perfil recém-criado não pode ficar órfão se a linha não gravar.
@@ -238,7 +283,8 @@ func (s *Server) createYoutubeAccount(ctx *gin.Context) {
 		return
 	}
 
-	log.Printf("admin: conta criada account_id=%s label=%s por=%s", account.ID, account.Label, user.ID)
+	log.Printf("admin: conta criada account_id=%s label=%s plataforma=%s por=%s",
+		account.ID, account.Label, account.Platform, user.ID)
 	ctx.JSON(http.StatusCreated, newYoutubeAccountResponse(account, browser.SessionInfo{State: browser.SessionStateStopped}))
 }
 
@@ -340,7 +386,7 @@ func (s *Server) refreshAccountStatus(ctx context.Context, account db.YoutubeAcc
 	requestCtx, cancel := context.WithTimeout(ctx, browserOperationTimeout)
 	defer cancel()
 
-	result, err := s.browser.Check(requestCtx, account.ID)
+	result, err := s.browser.Check(requestCtx, account.ID, account.Platform)
 
 	status := db.CoreYoutubeAccountStatusAUTHENTICATED
 	lastError := pgtype.Text{Valid: false}
@@ -394,20 +440,26 @@ func truncateMessage(message string) string {
 // conta: menor prioridade, depois uso mais antigo. Serve só para o painel
 // mostrar quem é a próxima; a escolha de verdade continua sendo atômica no
 // banco, no momento do download.
+// markNextInRotation aponta, POR PLATAFORMA, a conta que o próximo download vai
+// escolher. Uma marca só para a lista inteira mentiria agora que o rodízio é
+// separado: a próxima do YouTube não diz nada sobre a próxima do Vimeo.
 func markNextInRotation(response []youtubeAccountResponse, accounts []db.YoutubeAccount) {
-	best := -1
+	melhorPorPlataforma := make(map[string]int)
 
 	for i, account := range accounts {
 		if !account.Active || account.Status != db.CoreYoutubeAccountStatusAUTHENTICATED {
 			continue
 		}
-		if best < 0 || rotatesBefore(account, accounts[best]) {
-			best = i
+		atual, existe := melhorPorPlataforma[account.Platform]
+		if !existe || rotatesBefore(account, accounts[atual]) {
+			melhorPorPlataforma[account.Platform] = i
 		}
 	}
 
-	if best >= 0 && best < len(response) {
-		response[best].NextInRotation = true
+	for _, indice := range melhorPorPlataforma {
+		if indice < len(response) {
+			response[indice].NextInRotation = true
+		}
 	}
 }
 

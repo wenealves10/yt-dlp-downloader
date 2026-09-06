@@ -301,4 +301,5 @@ type YoutubeAccount struct {
 	CreatedAt           *time.Time               `json:"created_at"`
 	UpdatedAt           *time.Time               `json:"updated_at"`
 	DeletedAt           pgtype.Timestamptz       `json:"deleted_at"`
+	Platform            string                   `json:"platform"`
 }

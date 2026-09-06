@@ -11,41 +11,43 @@ import (
 )
 
 func TestInterpretarProgresso(t *testing.T) {
-	progresso, ok := interpretarProgresso("downloading|52428800|104857600|NA|8388608|12")
+	progresso, faixa, status, ok := interpretarProgresso("downloading|52428800|104857600|NA|8388608|12|137")
 	require.True(t, ok)
 	require.InDelta(t, 50.0, progresso.Percent, 0.01)
 	require.Equal(t, int64(52428800), progresso.DownloadedBytes)
 	require.Equal(t, int64(104857600), progresso.TotalBytes)
 	require.Equal(t, int64(8388608), progresso.SpeedBPS)
 	require.Equal(t, 12, progresso.ETASeconds)
-	require.False(t, progresso.Postprocess)
+	require.Equal(t, "137", faixa)
+	require.Equal(t, "downloading", status)
 }
 
 func TestInterpretarProgressoUsaEstimativaQuandoNaoHaTotalExato(t *testing.T) {
-	progresso, ok := interpretarProgresso("downloading|50|NA|200|1000|4")
+	progresso, _, _, ok := interpretarProgresso("downloading|50|NA|200|1000|4|137")
 	require.True(t, ok)
 	require.Equal(t, int64(200), progresso.TotalBytes)
 	require.InDelta(t, 25.0, progresso.Percent, 0.01)
 }
 
-func TestInterpretarProgressoMarcaPosProcessamento(t *testing.T) {
-	// "finished" no download bruto significa que começou o merge/conversão. Sem
-	// marcar, a barra fica em 100% parecendo travada.
-	progresso, ok := interpretarProgresso("finished|104857600|104857600|NA|NA|NA")
+func TestInterpretarProgressoIgnoraFaixaDesconhecida(t *testing.T) {
+	// "NA" é o "não sei" do yt-dlp. Tratá-lo como id faria cada amostra parecer
+	// uma faixa nova e zeraria a contagem a cada linha.
+	_, faixa, _, ok := interpretarProgresso("downloading|50|100|NA|1000|4|NA")
 	require.True(t, ok)
-	require.True(t, progresso.Postprocess)
-	require.InDelta(t, 100.0, progresso.Percent, 0.01)
+	require.Empty(t, faixa)
 }
 
 func TestInterpretarProgressoToleraCamposAusentes(t *testing.T) {
-	// Nem toda plataforma informa tamanho, velocidade ou ETA.
-	progresso, ok := interpretarProgresso("downloading|1024|NA|NA|None|NA")
+	// Nem toda plataforma informa tamanho, velocidade ou ETA. A linha sem o id
+	// do formato também é aceita: é o formato antigo do template.
+	progresso, faixa, _, ok := interpretarProgresso("downloading|1024|NA|NA|None|NA")
 	require.True(t, ok)
 	require.Equal(t, int64(1024), progresso.DownloadedBytes)
 	require.Zero(t, progresso.TotalBytes)
 	require.Zero(t, progresso.Percent)
+	require.Empty(t, faixa)
 
-	_, ok = interpretarProgresso("linha inesperada")
+	_, _, _, ok = interpretarProgresso("linha inesperada")
 	require.False(t, ok)
 }
 

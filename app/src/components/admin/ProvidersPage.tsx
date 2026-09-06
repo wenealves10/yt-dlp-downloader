@@ -67,7 +67,7 @@ interface Etapa {
 interface Resposta {
   stages: Etapa[];
   healthy: boolean;
-  platforms?: { id: string; label: string }[];
+  platforms?: { id: string; label: string; supported?: boolean }[];
 }
 
 const ORIGEM: Record<string, string> = {
@@ -300,17 +300,31 @@ export const ProvidersPage: React.FC = () => {
               <p className="text-sm text-gray-400 mb-4">
                 Estas têm rótulo próprio na tela. O provider aceita bem mais que
                 isso — qualquer link público que ele saiba resolver funciona, só
-                aparece como "Outra plataforma".
+                aparece como "Outra plataforma". As riscadas são reconhecidas
+                pela URL mas não têm extractor: o link é recusado na hora, em
+                vez de falhar depois de uma espera longa.
               </p>
               <div className="flex flex-wrap gap-2">
-                {data.platforms.map((plataforma) => (
-                  <span
-                    key={plataforma.id}
-                    className="px-2.5 py-1 rounded-full bg-gray-700 text-gray-300 text-xs"
-                  >
-                    {plataforma.label}
-                  </span>
-                ))}
+                {data.platforms.map((plataforma) => {
+                  const suportada = plataforma.supported !== false;
+                  return (
+                    <span
+                      key={plataforma.id}
+                      title={
+                        suportada
+                          ? undefined
+                          : `${plataforma.label} não é suportado pelo mecanismo de download`
+                      }
+                      className={`px-2.5 py-1 rounded-full text-xs ${
+                        suportada
+                          ? "bg-gray-700 text-gray-300"
+                          : "bg-gray-800 text-gray-500 line-through border border-gray-700"
+                      }`}
+                    >
+                      {plataforma.label}
+                    </span>
+                  );
+                })}
               </div>
             </section>
           )}

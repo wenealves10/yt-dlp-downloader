@@ -424,7 +424,12 @@ func (s *session) info() browser.SessionInfo {
 // Start abre (ou reaproveita) o navegador da conta. É idempotente: dois pedidos
 // simultâneos devolvem a mesma sessão, nunca dois navegadores sobre o mesmo
 // perfil.
-func (m *Manager) Start(accountID string) (browser.SessionInfo, error) {
+func (m *Manager) Start(accountID, plataforma string) (browser.SessionInfo, error) {
+	// O perfil abre direto na tela de login da plataforma da conta. Abrir
+	// sempre no Google, como antes, deixaria quem cadastrou uma conta do Vimeo
+	// olhando para o login errado.
+	perfil := browser.PerfilDe(plataforma)
+
 	profileDir, err := m.ProfilePath(accountID)
 	if err != nil {
 		return browser.SessionInfo{}, err
@@ -453,7 +458,7 @@ func (m *Manager) Start(accountID string) (browser.SessionInfo, error) {
 	}
 	m.clearProfileLocks(profileDir)
 
-	created, err := m.launch(accountID, profileDir)
+	created, err := m.launch(accountID, profileDir, perfil.LoginURL)
 	if err != nil {
 		m.mu.Lock()
 		m.sessions[accountID] = &session{

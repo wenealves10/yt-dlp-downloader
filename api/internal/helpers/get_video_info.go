@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"sort"
 
+	"github.com/wenealves10/yt-dlp-downloader/internal/browser"
 	"github.com/wenealves10/yt-dlp-downloader/internal/ytaccounts"
 )
 
@@ -62,7 +63,7 @@ func GetVideoInfo(ctx context.Context, provider ytaccounts.Provider, url string)
 // dumpVideoJSON executa uma tentativa e devolve também o stderr do yt-dlp, que
 // é onde a recusa de sessão aparece.
 func dumpVideoJSON(ctx context.Context, provider ytaccounts.Provider, url string) (*VideoInfo, []byte, error) {
-	lease := ytaccounts.Acquire(ctx, provider)
+	lease := ytaccounts.Acquire(ctx, provider, browser.PlataformaPadrao)
 	defer lease.Release()
 
 	args := append(ytaccounts.AuthArgs(lease), "--dump-json", url)

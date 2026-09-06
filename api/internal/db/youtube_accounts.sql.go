@@ -20,13 +20,19 @@ WHERE id = (
   WHERE deleted_at IS NULL
     AND active = true
     AND status = 'AUTHENTICATED'
-    AND NOT (id = ANY($1::uuid[]))
+    AND youtube_accounts.platform = $1
+    AND NOT (id = ANY($2::uuid[]))
   ORDER BY priority ASC, last_used_at ASC NULLS FIRST, created_at ASC
   LIMIT 1
   FOR UPDATE SKIP LOCKED
 )
-RETURNING id, label, email, status, profile_dir, active, priority, last_checked_at, last_authenticated_at, last_used_at, last_error, created_by, created_at, updated_at, deleted_at
+RETURNING id, label, email, status, profile_dir, active, priority, last_checked_at, last_authenticated_at, last_used_at, last_error, created_by, created_at, updated_at, deleted_at, platform
 `
+
+type ClaimYoutubeAccountParams struct {
+	TargetPlatform string      `json:"target_platform"`
+	Exclude        []uuid.UUID `json:"exclude"`
+}
 
 // Reivindica a conta autenticada usada há mais tempo e já registra o uso na
 // mesma operação, de modo que o rodízio não dependa de um UPDATE posterior.
@@ -36,10 +42,13 @@ RETURNING id, label, email, status, profile_dir, active, priority, last_checked_
 // as contas já descartadas nesta tentativa, o que permite passar para a
 // próxima quando uma sessão se revela inválida.
 //
-// Não é rotação para contornar limites do YouTube: é distribuição justa entre
-// as contas legítimas do próprio administrador, respeitando a prioridade.
-func (q *Queries) ClaimYoutubeAccount(ctx context.Context, exclude []uuid.UUID) (YoutubeAccount, error) {
-	row := q.db.QueryRow(ctx, claimYoutubeAccount, exclude)
+// A seleção é por plataforma: a sessão do Vimeo não serve para baixar do
+// Reddit, e emprestar uma para a outra só gastaria a conta errada.
+//
+// Não é rotação para contornar limites da plataforma: é distribuição justa
+// entre as contas legítimas do próprio administrador, respeitando a prioridade.
+func (q *Queries) ClaimYoutubeAccount(ctx context.Context, arg ClaimYoutubeAccountParams) (YoutubeAccount, error) {
+	row := q.db.QueryRow(ctx, claimYoutubeAccount, arg.TargetPlatform, arg.Exclude)
 	var i YoutubeAccount
 	err := row.Scan(
 		&i.ID,
@@ -57,8 +66,44 @@ func (q *Queries) ClaimYoutubeAccount(ctx context.Context, exclude []uuid.UUID) 
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.Platform,
 	)
 	return i, err
+}
+
+const countAuthenticatedAccountsByPlatform = `-- name: CountAuthenticatedAccountsByPlatform :many
+SELECT platform, COUNT(*) AS total FROM youtube_accounts
+WHERE deleted_at IS NULL
+  AND active = true
+  AND status = 'AUTHENTICATED'
+GROUP BY platform
+`
+
+type CountAuthenticatedAccountsByPlatformRow struct {
+	Platform string `json:"platform"`
+	Total    int64  `json:"total"`
+}
+
+// Quantas contas autenticadas existem por plataforma. É o que a tela de
+// diagnóstico usa para dizer "o Vimeo precisa de conta e não há nenhuma".
+func (q *Queries) CountAuthenticatedAccountsByPlatform(ctx context.Context) ([]CountAuthenticatedAccountsByPlatformRow, error) {
+	rows, err := q.db.Query(ctx, countAuthenticatedAccountsByPlatform)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountAuthenticatedAccountsByPlatformRow{}
+	for rows.Next() {
+		var i CountAuthenticatedAccountsByPlatformRow
+		if err := rows.Scan(&i.Platform, &i.Total); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const countAuthenticatedYoutubeAccounts = `-- name: CountAuthenticatedYoutubeAccounts :one
@@ -89,12 +134,12 @@ func (q *Queries) CountYoutubeAccounts(ctx context.Context) (int64, error) {
 
 const createYoutubeAccount = `-- name: CreateYoutubeAccount :one
 INSERT INTO youtube_accounts (
-  id, label, email, status, profile_dir, priority, created_by
+  id, label, email, status, profile_dir, priority, created_by, platform
 )
 VALUES (
-  $1, $2, $3, $4, $5, $6, $7
+  $1, $2, $3, $4, $5, $6, $7, $8
 )
-RETURNING id, label, email, status, profile_dir, active, priority, last_checked_at, last_authenticated_at, last_used_at, last_error, created_by, created_at, updated_at, deleted_at
+RETURNING id, label, email, status, profile_dir, active, priority, last_checked_at, last_authenticated_at, last_used_at, last_error, created_by, created_at, updated_at, deleted_at, platform
 `
 
 type CreateYoutubeAccountParams struct {
@@ -105,6 +150,7 @@ type CreateYoutubeAccountParams struct {
 	ProfileDir string                   `json:"profile_dir"`
 	Priority   int32                    `json:"priority"`
 	CreatedBy  pgtype.UUID              `json:"created_by"`
+	Platform   string                   `json:"platform"`
 }
 
 func (q *Queries) CreateYoutubeAccount(ctx context.Context, arg CreateYoutubeAccountParams) (YoutubeAccount, error) {
@@ -116,6 +162,7 @@ func (q *Queries) CreateYoutubeAccount(ctx context.Context, arg CreateYoutubeAcc
 		arg.ProfileDir,
 		arg.Priority,
 		arg.CreatedBy,
+		arg.Platform,
 	)
 	var i YoutubeAccount
 	err := row.Scan(
@@ -134,6 +181,7 @@ func (q *Queries) CreateYoutubeAccount(ctx context.Context, arg CreateYoutubeAcc
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.Platform,
 	)
 	return i, err
 }
@@ -150,7 +198,7 @@ func (q *Queries) DeleteYoutubeAccount(ctx context.Context, id uuid.UUID) error 
 }
 
 const getYoutubeAccountByID = `-- name: GetYoutubeAccountByID :one
-SELECT id, label, email, status, profile_dir, active, priority, last_checked_at, last_authenticated_at, last_used_at, last_error, created_by, created_at, updated_at, deleted_at FROM youtube_accounts
+SELECT id, label, email, status, profile_dir, active, priority, last_checked_at, last_authenticated_at, last_used_at, last_error, created_by, created_at, updated_at, deleted_at, platform FROM youtube_accounts
 WHERE id = $1
   AND deleted_at IS NULL
 `
@@ -174,12 +222,13 @@ func (q *Queries) GetYoutubeAccountByID(ctx context.Context, id uuid.UUID) (Yout
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.Platform,
 	)
 	return i, err
 }
 
 const getYoutubeAccounts = `-- name: GetYoutubeAccounts :many
-SELECT id, label, email, status, profile_dir, active, priority, last_checked_at, last_authenticated_at, last_used_at, last_error, created_by, created_at, updated_at, deleted_at FROM youtube_accounts
+SELECT id, label, email, status, profile_dir, active, priority, last_checked_at, last_authenticated_at, last_used_at, last_error, created_by, created_at, updated_at, deleted_at, platform FROM youtube_accounts
 WHERE deleted_at IS NULL
 ORDER BY priority ASC, created_at ASC
 `
@@ -209,6 +258,7 @@ func (q *Queries) GetYoutubeAccounts(ctx context.Context) ([]YoutubeAccount, err
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
+			&i.Platform,
 		); err != nil {
 			return nil, err
 		}
@@ -221,7 +271,7 @@ func (q *Queries) GetYoutubeAccounts(ctx context.Context) ([]YoutubeAccount, err
 }
 
 const getYoutubeAccountsForHealthCheck = `-- name: GetYoutubeAccountsForHealthCheck :many
-SELECT id, label, email, status, profile_dir, active, priority, last_checked_at, last_authenticated_at, last_used_at, last_error, created_by, created_at, updated_at, deleted_at FROM youtube_accounts
+SELECT id, label, email, status, profile_dir, active, priority, last_checked_at, last_authenticated_at, last_used_at, last_error, created_by, created_at, updated_at, deleted_at, platform FROM youtube_accounts
 WHERE deleted_at IS NULL
   AND active = true
   AND status IN ('AUTHENTICATED', 'REQUIRES_AUTH', 'AWAITING_LOGIN', 'ERROR')
@@ -253,6 +303,7 @@ func (q *Queries) GetYoutubeAccountsForHealthCheck(ctx context.Context) ([]Youtu
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
+			&i.Platform,
 		); err != nil {
 			return nil, err
 		}
@@ -275,7 +326,7 @@ SET
   updated_at = now()
 WHERE id = $1
   AND deleted_at IS NULL
-RETURNING id, label, email, status, profile_dir, active, priority, last_checked_at, last_authenticated_at, last_used_at, last_error, created_by, created_at, updated_at, deleted_at
+RETURNING id, label, email, status, profile_dir, active, priority, last_checked_at, last_authenticated_at, last_used_at, last_error, created_by, created_at, updated_at, deleted_at, platform
 `
 
 type UpdateYoutubeAccountParams struct {
@@ -313,6 +364,7 @@ func (q *Queries) UpdateYoutubeAccount(ctx context.Context, arg UpdateYoutubeAcc
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.Platform,
 	)
 	return i, err
 }
@@ -330,7 +382,7 @@ SET
   updated_at = now()
 WHERE id = $3
   AND deleted_at IS NULL
-RETURNING id, label, email, status, profile_dir, active, priority, last_checked_at, last_authenticated_at, last_used_at, last_error, created_by, created_at, updated_at, deleted_at
+RETURNING id, label, email, status, profile_dir, active, priority, last_checked_at, last_authenticated_at, last_used_at, last_error, created_by, created_at, updated_at, deleted_at, platform
 `
 
 type UpdateYoutubeAccountStatusParams struct {
@@ -360,6 +412,7 @@ func (q *Queries) UpdateYoutubeAccountStatus(ctx context.Context, arg UpdateYout
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.Platform,
 	)
 	return i, err
 }

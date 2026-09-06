@@ -1,9 +1,9 @@
 -- name: CreateYoutubeAccount :one
 INSERT INTO youtube_accounts (
-  id, label, email, status, profile_dir, priority, created_by
+  id, label, email, status, profile_dir, priority, created_by, platform
 )
 VALUES (
-  $1, $2, $3, $4, $5, $6, $7
+  $1, $2, $3, $4, $5, $6, $7, $8
 )
 RETURNING *;
 
@@ -29,8 +29,11 @@ WHERE deleted_at IS NULL;
 -- as contas já descartadas nesta tentativa, o que permite passar para a
 -- próxima quando uma sessão se revela inválida.
 --
--- Não é rotação para contornar limites do YouTube: é distribuição justa entre
--- as contas legítimas do próprio administrador, respeitando a prioridade.
+-- A seleção é por plataforma: a sessão do Vimeo não serve para baixar do
+-- Reddit, e emprestar uma para a outra só gastaria a conta errada.
+--
+-- Não é rotação para contornar limites da plataforma: é distribuição justa
+-- entre as contas legítimas do próprio administrador, respeitando a prioridade.
 -- name: ClaimYoutubeAccount :one
 UPDATE youtube_accounts
 SET last_used_at = now(), updated_at = now()
@@ -39,6 +42,7 @@ WHERE id = (
   WHERE deleted_at IS NULL
     AND active = true
     AND status = 'AUTHENTICATED'
+    AND youtube_accounts.platform = sqlc.arg('target_platform')
     AND NOT (id = ANY(sqlc.arg('exclude')::uuid[]))
   ORDER BY priority ASC, last_used_at ASC NULLS FIRST, created_at ASC
   LIMIT 1
@@ -51,6 +55,15 @@ SELECT COUNT(*) FROM youtube_accounts
 WHERE deleted_at IS NULL
   AND active = true
   AND status = 'AUTHENTICATED';
+
+-- Quantas contas autenticadas existem por plataforma. É o que a tela de
+-- diagnóstico usa para dizer "o Vimeo precisa de conta e não há nenhuma".
+-- name: CountAuthenticatedAccountsByPlatform :many
+SELECT platform, COUNT(*) AS total FROM youtube_accounts
+WHERE deleted_at IS NULL
+  AND active = true
+  AND status = 'AUTHENTICATED'
+GROUP BY platform;
 
 -- name: GetYoutubeAccountsForHealthCheck :many
 SELECT * FROM youtube_accounts

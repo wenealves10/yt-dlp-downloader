@@ -46,7 +46,7 @@ func TestClientTraduzOsCodigosDeErro(t *testing.T) {
 		}))
 
 		client := NewClient(server.URL, "segredo", time.Second)
-		_, err := client.StartSession(context.Background(), uuid.New())
+		_, err := client.StartSession(context.Background(), uuid.New(), "youtube")
 
 		require.ErrorIs(t, err, esperado, status)
 		server.Close()
@@ -69,7 +69,7 @@ func TestCookiesRecusaJarVazio(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient(server.URL, "segredo", time.Second)
-	_, err := client.Cookies(context.Background(), uuid.New())
+	_, err := client.Cookies(context.Background(), uuid.New(), "youtube")
 
 	require.Error(t, err)
 }

@@ -1,8 +1,8 @@
 import React from "react";
-import { Loader, CheckCircle, AlertTriangle } from "lucide-react";
+import { Loader, CheckCircle, AlertTriangle, Ban } from "lucide-react";
 
 interface StatusBadgeProps {
-  status: "queue" | "processing" | "complete" | "expired" | "error";
+  status: "queue" | "processing" | "complete" | "expired" | "error" | "canceled";
 }
 
 export const StatusBadge: React.FC<StatusBadgeProps> = ({ status }) => {
@@ -31,6 +31,13 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ status }) => {
       text: "Expirado",
       icon: <AlertTriangle className="h-3 w-3 mr-1" />,
       className: "bg-yellow-600 text-white",
+    },
+    // Cancelado não é erro nem expiração: foi o usuário que pediu. Mostrá-lo
+    // como "Expirado" fazia parecer que o sistema tinha desistido sozinho.
+    canceled: {
+      text: "Cancelado",
+      icon: <Ban className="h-3 w-3 mr-1" />,
+      className: "bg-gray-600 text-gray-200",
     },
   }[status] || { text: "...", icon: null, className: "" };
 

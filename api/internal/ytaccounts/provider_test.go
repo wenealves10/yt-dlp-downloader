@@ -86,7 +86,7 @@ func TestIsAuthFailureReconheceSessaoRecusada(t *testing.T) {
 	}
 	for _, saida := range recusas {
 		require.True(t, IsAuthFailure(saida), string(saida))
-		require.Contains(t, AuthFailureReason(saida), "o YouTube recusou a sessão")
+		require.Contains(t, AuthFailureReason(saida), "a plataforma recusou a sessão")
 	}
 }
 
@@ -115,4 +115,46 @@ func TestReportAuthFailureIgnoraChamadaSemConta(t *testing.T) {
 		ReportAuthFailure(context.Background(), nil, nil, []byte("Please sign in"))
 		ReportAuthFailure(context.Background(), (*Manager)(nil), nil, []byte("Please sign in"))
 	})
+}
+
+// As outras plataformas recusam a sessão com outras palavras. Sem reconhecê-las,
+// um cookie expirado do Vimeo ficaria no rodízio para sempre, derrubando todo
+// download que o pegasse.
+func TestIsAuthFailureReconheceOutrasPlataformas(t *testing.T) {
+	casos := map[string]string{
+		"vimeo":  "ERROR: [vimeo] 123: The web client only works when logged-in.",
+		"reddit": "ERROR: [reddit] abc: Login required to view this content",
+		"x":      "ERROR: [twitter] 1: You must be logged in to view this Tweet.",
+	}
+
+	for nome, saida := range casos {
+		if !IsAuthFailure([]byte(saida)) {
+			t.Errorf("[%s] deveria ser reconhecido como sessão recusada: %q", nome, saida)
+		}
+	}
+}
+
+// Restrição de conteúdo não é sessão expirada: tirar a conta do rodízio por
+// causa de um vídeo privado gastaria todas as contas boas do administrador.
+func TestIsAuthFailureIgnoraRestricaoDeConteudo(t *testing.T) {
+	casos := []string{
+		"ERROR: [youtube] abc: Private video. Sign in if you've been granted access to this video",
+		"ERROR: [youtube] abc: Video unavailable. This video is not available in your country",
+		"ERROR: [vimeo] 1: The page needs to be reloaded",
+	}
+
+	for _, saida := range casos {
+		if IsAuthFailure([]byte(saida)) {
+			t.Errorf("não deveria derrubar a conta: %q", saida)
+		}
+	}
+}
+
+// "This content isn't available" é ambíguo por natureza: o Facebook responde
+// isso tanto para post apagado quanto para sessão expirada. Tratá-lo como falha
+// de autenticação derrubaria contas boas por causa de um conteúdo removido.
+func TestIsAuthFailureIgnoraMensagemAmbigua(t *testing.T) {
+	if IsAuthFailure([]byte("ERROR: [facebook] 1: This content isn't available right now")) {
+		t.Error("mensagem ambígua não pode tirar a conta do rodízio")
+	}
 }

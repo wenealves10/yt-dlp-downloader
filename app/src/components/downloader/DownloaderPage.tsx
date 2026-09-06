@@ -18,7 +18,7 @@ const apiUrl = import.meta.env.VITE_API_URL;
 interface Job {
   id: string;
   title?: string;
-  status: "queue" | "processing" | "complete" | "expired" | "error";
+  status: "queue" | "processing" | "complete" | "expired" | "error" | "canceled";
   format: string;
   thumbnail?: string;
   durationSeconds?: number;
@@ -49,7 +49,7 @@ function convertStatus(apiStatus: string): Job["status"] {
     case "FAILED":
       return "error";
     case "CANCELED":
-      return "expired";
+      return "canceled";
     default:
       return "queue";
   }
@@ -154,10 +154,25 @@ export const DownloaderPage: React.FC = () => {
   const handleCancel = async (id: string) => {
     if (!token) return;
     setError("");
+
+    // O card muda na hora. O worker leva até 2 s para perceber o pedido, e
+    // deixar o botão "Cancelar" aceso nesse intervalo fazia parecer que o
+    // clique não tinha funcionado.
+    setJobs((prev) =>
+      prev.map((job) =>
+        job.id === id && (job.status === "queue" || job.status === "processing")
+          ? { ...job, status: "canceled", progress: undefined }
+          : job
+      )
+    );
+
     try {
       await cancelDownload(token)(id);
     } catch (falha) {
+      // A API não recusa mais um cancelamento por corrida de status; se algo
+      // falhou aqui foi de verdade, e a lista precisa voltar ao estado real.
       setError(falha instanceof Error ? falha.message : "Não foi possível cancelar.");
+      downloadsQuery.refetch();
     }
   };
 

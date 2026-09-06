@@ -51,6 +51,13 @@ func (p *JobUploadMusic) ProcessTask(ctx context.Context, task *asynq.Task) erro
 		return fmt.Errorf("failed to check download existence: %v: %w", err, asynq.SkipRetry)
 	}
 
+	// Cancelar enquanto esta tarefa esperava na fila é o caso mais comum num
+	// arquivo grande; subir mesmo assim deixaria no bucket exatamente o que o
+	// usuário mandou descartar.
+	if abortadoPeloUsuario(downloadExists, payload.MusicPath, payload.BannerPath) {
+		return nil
+	}
+
 	// Medido antes do upload, porque o arquivo local é apagado logo em
 	// seguida. É o que alimenta as métricas de armazenamento do painel; falhar
 	// aqui não pode derrubar um download já concluído.

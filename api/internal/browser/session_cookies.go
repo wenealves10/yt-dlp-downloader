@@ -2,28 +2,27 @@ package browser
 
 import "strings"
 
-// sessionCookieNames são os cookies que o Google emite para uma sessão logada.
+// IsSessionCookie informa se o cookie faz parte da sessão autenticada da
+// plataforma.
+//
 // A lista é o contrato entre quem lê o perfil (o serviço de navegador) e quem
 // consome a sessão (o downloader): os dois precisam concordar sobre o que
-// significa "esta conta está autenticada".
-var sessionCookieNames = map[string]bool{
-	"SID":               true,
-	"__Secure-1PSID":    true,
-	"__Secure-3PSID":    true,
-	"LOGIN_INFO":        true,
-	"SAPISID":           true,
-	"__Secure-1PAPISID": true,
-}
-
-// IsSessionCookie informa se o cookie faz parte da sessão autenticada.
-func IsSessionCookie(name string) bool {
-	return sessionCookieNames[name]
+// significa "esta conta está autenticada". Ela é por plataforma porque o mesmo
+// nome tem donos diferentes — `sessionid` é do Instagram e do TikTok, e um não
+// prova nada sobre o outro.
+func IsSessionCookie(plataforma, name string) bool {
+	for _, esperado := range PerfilDe(plataforma).CookiesDeSessao {
+		if esperado == name {
+			return true
+		}
+	}
+	return false
 }
 
 // CountSessionCookies conta os cookies de sessão em um jar no formato Netscape.
 // Serve para descartar uma conta obviamente deslogada sem gastar uma requisição
-// ao YouTube. Nenhum valor de cookie é lido, apenas os nomes.
-func CountSessionCookies(jar []byte) int {
+// à plataforma. Nenhum valor de cookie é lido, apenas os nomes.
+func CountSessionCookies(plataforma string, jar []byte) int {
 	found := 0
 
 	for _, line := range strings.Split(string(jar), "\n") {
@@ -36,7 +35,7 @@ func CountSessionCookies(jar []byte) int {
 		if len(fields) < 7 {
 			continue
 		}
-		if IsSessionCookie(fields[5]) {
+		if IsSessionCookie(plataforma, fields[5]) {
 			found++
 		}
 	}

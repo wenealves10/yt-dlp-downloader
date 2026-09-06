@@ -105,6 +105,15 @@ func (p *JobDownloadMedia) ProcessTask(ctx context.Context, task *asynq.Task) er
 	}
 	defer os.RemoveAll(filepath.Dir(resultado.FilePath))
 
+	// Última checagem antes de o arquivo sair do diretório temporário. Sem ela,
+	// um cancelamento pedido nos segundos finais ainda mandava o arquivo para o
+	// storage: o download parava, mas o resultado ficava — exatamente o que o
+	// usuário não quer quando cancela. O defer acima apaga o temporário.
+	if p.cancelamentoPedido(context.WithoutCancel(ctx), download.ID) {
+		log.Printf("jobs: cancelado após concluir o download; arquivo descartado id=%s", download.ID)
+		return p.registrarFalha(ctx, download, media.ErrCanceled)
+	}
+
 	// A partir daqui o arquivo existe em disco; o envio ao storage segue pelo
 	// caminho de upload que já existe.
 	return p.encaminharParaUpload(ctx, download, resultado)
@@ -149,8 +158,9 @@ func (p *JobDownloadMedia) baixar(ctx context.Context, download db.Download) (*m
 	}
 
 	// A sessão gerenciada é emprestada só durante o download e o arquivo de
-	// cookies é destruído no Release.
-	lease := ytaccounts.Acquire(ctx, p.accounts)
+	// cookies é destruído no Release. A conta é a da plataforma DESTE conteúdo:
+	// uma sessão do YouTube não autentica no Vimeo.
+	lease := ytaccounts.Acquire(ctx, p.accounts, download.Platform)
 	defer lease.Release()
 
 	cookieFile := ""
@@ -177,6 +187,10 @@ func (p *JobDownloadMedia) baixar(ctx context.Context, download db.Download) (*m
 		OutputDir:  dir,
 		Filename:   "media_" + download.ID.String(),
 		CookieFile: cookieFile,
+		// O tamanho estimado na criação já soma vídeo + áudio; é o denominador
+		// estável que impede a barra de reiniciar quando o yt-dlp troca de
+		// faixa.
+		ExpectedBytes: download.TotalBytes,
 	}, func(progresso media.Progress) {
 		agora := time.Now()
 		if agora.Sub(ultimoEvento) >= intervaloProgresso {

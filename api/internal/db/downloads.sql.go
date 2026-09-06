@@ -14,11 +14,18 @@ import (
 
 const cancelDownload = `-- name: CancelDownload :one
 UPDATE downloads
-SET status = 'CANCELED', finished_at = now()
+SET status = CASE
+      WHEN status IN ('PENDING', 'PROCESSING', 'RETRYING')
+        THEN 'CANCELED'::core.download_status
+      ELSE status
+    END,
+    finished_at = CASE
+      WHEN status IN ('PENDING', 'PROCESSING', 'RETRYING') THEN now()
+      ELSE finished_at
+    END
 WHERE id = $1
   AND user_id = $2
   AND deleted_at IS NULL
-  AND status IN ('PENDING', 'PROCESSING', 'RETRYING')
 RETURNING id, user_id, original_url, title, format, status, thumbnail_url, file_url, expires_at, duration_seconds, error_message, created_at, deleted_at, file_size_bytes, platform, provider, format_id, quality_label, progress_percent, downloaded_bytes, total_bytes, speed_bps, eta_seconds, started_at, finished_at, uploader
 `
 
@@ -27,8 +34,12 @@ type CancelDownloadParams struct {
 	UserID uuid.UUID `json:"user_id"`
 }
 
-// Só cancela o que ainda não terminou: um download já concluído não pode voltar
-// a CANCELED e sumir do histórico do usuário.
+// Cancelar é idempotente: o filtro de status está no SET, não no WHERE. Com ele
+// no WHERE, clicar em cancelar meio segundo depois de o download falhar sozinho
+// não casava linha nenhuma e a tela cuspia "não pode mais ser cancelado" — um
+// erro sobre uma corrida que o usuário não provocou nem pode evitar. Agora a
+// linha sempre volta: quem já terminou apenas mantém o status que tinha, e a
+// resposta diz qual é.
 func (q *Queries) CancelDownload(ctx context.Context, arg CancelDownloadParams) (Download, error) {
 	row := q.db.QueryRow(ctx, cancelDownload, arg.ID, arg.UserID)
 	var i Download
