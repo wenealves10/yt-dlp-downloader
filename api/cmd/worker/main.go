@@ -19,6 +19,7 @@ import (
 	"github.com/wenealves10/yt-dlp-downloader/internal/jobs"
 	"github.com/wenealves10/yt-dlp-downloader/internal/libs/storage/r2"
 	"github.com/wenealves10/yt-dlp-downloader/internal/libs/stream"
+	"github.com/wenealves10/yt-dlp-downloader/internal/media"
 	"github.com/wenealves10/yt-dlp-downloader/internal/providers"
 	"github.com/wenealves10/yt-dlp-downloader/internal/queues"
 	"github.com/wenealves10/yt-dlp-downloader/internal/tasks"
@@ -82,7 +83,10 @@ func main() {
 
 	browserClient := browser.NewClient(cg.BrowserServiceURL, cg.BrowserServiceToken, cg.BrowserServiceTimeout)
 	accountProvider := ytaccounts.NewManager(store, browserClient)
-	mediaRegistry := providers.Registry(cg)
+	mediaRegistry := providers.Registry(cg, media.RoleDownloader)
+	// O painel roda na API; é daqui que sai o diagnóstico do processo que
+	// realmente baixa.
+	saudeMidia := jobs.NewJobMediaHealth(rdb, mediaRegistry, media.RoleDownloader)
 
 	srv := asynq.NewServer(
 		asynqRedisOpt,
@@ -98,6 +102,7 @@ func main() {
 				queues.TypeYoutubeHealthCheckQueue: queues.QueueWeightYoutubeHealth,
 				queues.TypeDownloadMediaQueue:      queues.QueueWeightDownloadMedia,
 				queues.TypeTempCleanupQueue:        queues.QueueWeightTempCleanup,
+				queues.TypeMediaHealthQueue:        queues.QueueWeightMediaHealth,
 			},
 		},
 	)
@@ -106,6 +111,10 @@ func main() {
 	// varrer na subida é o que impede o disco encher com sobras de execuções
 	// anteriores.
 	jobs.LimparTemporariosOrfaos(cg.MediaWorkDir)
+
+	// Publica já na subida: esperar o primeiro agendamento deixaria o painel
+	// sem resposta por minutos logo depois de um deploy.
+	saudeMidia.Publicar(ctx)
 
 	go startScheduledTasks(asynqRedisOpt, browserClient.Configured())
 
@@ -126,6 +135,8 @@ func main() {
 	mux.Handle(tasks.TypeDownloadExpiration, jobs.NewJobDownloadExpiration(asynqClient, store))
 	mux.Handle(tasks.TypeYoutubeHealthCheck, jobs.NewJobYoutubeHealthCheck(store, browserClient))
 	mux.Handle(tasks.TypeTempCleanup, jobs.NewJobTempCleanup(cg.MediaWorkDir))
+
+	mux.Handle(tasks.TypeMediaHealth, saudeMidia)
 	log.Printf("Starting worker server on %s with a maximum of %d concurrent tasks", redisAddr, queues.WorkerConcurrency)
 
 	if err := srv.Run(mux); err != nil {
@@ -174,6 +185,16 @@ func startScheduledTasks(redisOpt asynq.RedisClientOpt, withYoutubeHealthCheck b
 		log.Fatalf("failed to create temp cleanup task: %v", err)
 	}
 	if _, err := scheduler.Register("17 * * * *", limpezaTask, asynq.Queue(queues.TypeTempCleanupQueue)); err != nil {
+		log.Fatal(err)
+	}
+
+	// O relatório expira em 10 minutos; publicar a cada 5 mantém o painel com
+	// dado fresco e faz um worker morto aparecer como silencioso.
+	saudeTask, err := tasks.NewMediaHealthTask()
+	if err != nil {
+		log.Fatalf("failed to create media health task: %v", err)
+	}
+	if _, err := scheduler.Register("@every 5m", saudeTask, asynq.Queue(queues.TypeMediaHealthQueue)); err != nil {
 		log.Fatal(err)
 	}
 

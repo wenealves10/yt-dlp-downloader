@@ -115,15 +115,55 @@ type Progress struct {
 // leitura do stdout do processo, e bloquear aqui trava o download.
 type ProgressFunc func(Progress)
 
+// Role é o papel do processo que hospeda o provider. Existe porque as
+// dependências não são as mesmas: quem só resolve metadados nunca executa
+// ffmpeg, e cobrá-lo ali reportaria uma falha que não existe.
+type Role string
+
+const (
+	// RoleResolver só busca metadados: um `--dump-single-json` não junta faixa
+	// nem converte áudio.
+	RoleResolver Role = "resolver"
+	// RoleDownloader baixa e pós-processa. Aqui o ffmpeg é obrigatório.
+	RoleDownloader Role = "downloader"
+)
+
+func (r Role) Label() string {
+	if r == RoleDownloader {
+		return "Download"
+	}
+	return "Resolução de metadados"
+}
+
 // Health é o diagnóstico de um provider, usado pelo painel administrativo.
 type Health struct {
 	Provider  string    `json:"provider"`
+	Role      Role      `json:"role,omitempty"`
 	Available bool      `json:"available"`
 	Version   string    `json:"version,omitempty"`
 	Detail    string    `json:"detail,omitempty"`
 	Tools     []Tool    `json:"tools,omitempty"`
 	CheckedAt time.Time `json:"checked_at"`
 }
+
+// HealthReport é o diagnóstico de um processo, publicado para que outro possa
+// lê-lo. O painel roda na API, mas o download acontece no worker: sem isso, a
+// tela diagnosticaria o container errado.
+type HealthReport struct {
+	Role       Role      `json:"role"`
+	Providers  []Health  `json:"providers"`
+	ReportedAt time.Time `json:"reported_at"`
+}
+
+// HealthKey é onde o relatório de um papel é publicado. Fica aqui para que
+// quem escreve e quem lê não divirjam.
+func HealthKey(role Role) string {
+	return "media:health:" + string(role)
+}
+
+// HealthTTL faz o relatório expirar sozinho: um worker que parou de publicar
+// precisa aparecer como silencioso, e não como saudável para sempre.
+const HealthTTL = 10 * time.Minute
 
 // Tool é uma dependência externa do provider (o próprio binário, ffmpeg, o
 // runtime JavaScript).

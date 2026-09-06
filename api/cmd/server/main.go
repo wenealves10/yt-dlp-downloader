@@ -18,6 +18,7 @@ import (
 	"github.com/wenealves10/yt-dlp-downloader/internal/db"
 	"github.com/wenealves10/yt-dlp-downloader/internal/libs/storage/r2"
 	"github.com/wenealves10/yt-dlp-downloader/internal/libs/stream"
+	"github.com/wenealves10/yt-dlp-downloader/internal/media"
 	"github.com/wenealves10/yt-dlp-downloader/internal/providers"
 	"github.com/wenealves10/yt-dlp-downloader/internal/server"
 	"github.com/wenealves10/yt-dlp-downloader/internal/ytaccounts"
@@ -103,7 +104,9 @@ func main() {
 
 	// O registry é montado no mesmo lugar para API e worker; divergir aqui
 	// faria a tela resolver com uma configuração e o download usar outra.
-	mediaRegistry := providers.Registry(cg)
+	// A API só resolve metadados; quem baixa e junta faixas é o worker. O papel
+	// evita cobrar dela um ffmpeg que ela nunca executa.
+	mediaRegistry := providers.Registry(cg, media.RoleResolver)
 
 	api, err := server.NewServer(cg, store, asynqClient, sseManager, r2Storage,
 		rdb, browserClient, accountProvider, mediaRegistry)

@@ -24,7 +24,12 @@ WORKDIR /app
 
 ARG YT_DLP_VERSION=2026.8.19
 
-# Instalar apenas o necessário para rodar yt-dlp
+# Instalar apenas o necessário para rodar yt-dlp.
+#
+# ffmpeg NÃO entra aqui de propósito. A API só executa `--dump-single-json` para
+# ler metadados; quem baixa, junta vídeo com áudio e converte para MP3 é o
+# worker, e é o Dockerfile.worker que traz o ffmpeg. Instalá-lo nesta imagem
+# somaria centenas de MB a um binário que este processo nunca chama.
 RUN apt-get update && apt-get install -y \
     python3 \
     python3-venv \

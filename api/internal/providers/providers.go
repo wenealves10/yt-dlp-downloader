@@ -18,7 +18,7 @@ import (
 // Registry monta o registry na ordem de preferência: o primeiro que aceitar a
 // URL atende, e os seguintes servem de fallback quando ele falha por
 // indisponibilidade.
-func Registry(cfg configs.Config) *media.Registry {
+func Registry(cfg configs.Config, role media.Role) *media.Registry {
 	proxy := ""
 	if cfg.ProxyEnabled {
 		proxy = cfg.ProxyURL
@@ -32,6 +32,7 @@ func Registry(cfg configs.Config) *media.Registry {
 		Referer:         cfg.YoutubeDLReferer,
 		MetadataTimeout: duracaoOu(cfg.MediaMetadataTimeout, 45*time.Second),
 		DownloadTimeout: duracaoOu(cfg.MediaDownloadTimeout, 2*time.Hour),
+		Role:            role,
 	})
 
 	// Ordem futura, quando houver providers dedicados:

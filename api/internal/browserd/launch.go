@@ -168,7 +168,15 @@ func (m *Manager) chromeArgs(profileDir string, cdpPort int) []string {
 	}
 
 	if m.cfg.DisableSandbox {
-		args = append(args, "--no-sandbox")
+		// --test-type silencia a faixa amarela "You are using an unsupported
+		// command-line flag: --no-sandbox", que o Chrome desenha no topo de
+		// toda janela. Ela rouba altura da tela remota e assusta quem está
+		// apenas fazendo login — o aviso é para quem opera, e já está dito no
+		// README e no manifesto da stack.
+		//
+		// Não é flag de automação: não define navigator.webdriver nem
+		// --enable-automation, e o login do Google segue normal.
+		args = append(args, "--no-sandbox", "--test-type")
 	}
 	if m.cfg.ProxyURL != "" {
 		args = append(args, "--proxy-server="+m.cfg.ProxyURL)

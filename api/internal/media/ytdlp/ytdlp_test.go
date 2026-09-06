@@ -2,6 +2,8 @@ package ytdlp
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -150,3 +152,102 @@ func TestResumirStderrDescartaAvisos(t *testing.T) {
 type errFalso struct{}
 
 func (errFalso) Error() string { return "exit status 1" }
+
+// binarioFalso cria um executável que só imprime uma versão, para o health
+// check ter algo real para executar sem depender do que está instalado na
+// máquina que roda os testes.
+func binarioFalso(t *testing.T, nome, saida string) string {
+	t.Helper()
+
+	caminho := filepath.Join(t.TempDir(), nome)
+	script := "#!/bin/sh\necho \"" + saida + "\"\n"
+	if err := os.WriteFile(caminho, []byte(script), 0o700); err != nil {
+		t.Fatalf("não foi possível criar o binário falso: %v", err)
+	}
+	return caminho
+}
+
+// Sem ffmpeg, o processo que só resolve metadados continua saudável: ele nunca
+// junta faixas. Cobrar a dependência ali pintava de vermelho um container que
+// nunca a executou — que era exatamente o defeito do painel.
+func TestHealthResolverIgnoraFFmpegAusente(t *testing.T) {
+	provider := New(Config{
+		Binary:       binarioFalso(t, "yt-dlp", "2025.09.01"),
+		FFmpegBinary: filepath.Join(t.TempDir(), "ffmpeg-que-nao-existe"),
+		Role:         media.RoleResolver,
+	})
+
+	saude := provider.Health(context.Background())
+
+	if !saude.Available {
+		t.Fatalf("resolver deveria estar disponível sem ffmpeg, detalhe: %q", saude.Detail)
+	}
+	if saude.Role != media.RoleResolver {
+		t.Fatalf("papel esperado %q, obtido %q", media.RoleResolver, saude.Role)
+	}
+
+	ffmpeg, ok := ferramenta(saude.Tools, "ffmpeg")
+	if !ok {
+		t.Fatal("ffmpeg deveria aparecer na lista mesmo sem ser exigido")
+	}
+	if ffmpeg.Required {
+		t.Error("ffmpeg não deveria ser obrigatório para o resolver")
+	}
+	if ffmpeg.Available {
+		t.Error("ffmpeg inexistente não deveria ser reportado como disponível")
+	}
+}
+
+// No processo que baixa, a ausência do ffmpeg é falha de verdade: sem ele o
+// yt-dlp entrega faixa solta em vez de vídeo com áudio.
+func TestHealthDownloaderExigeFFmpeg(t *testing.T) {
+	provider := New(Config{
+		Binary:       binarioFalso(t, "yt-dlp", "2025.09.01"),
+		FFmpegBinary: filepath.Join(t.TempDir(), "ffmpeg-que-nao-existe"),
+		Role:         media.RoleDownloader,
+	})
+
+	saude := provider.Health(context.Background())
+
+	if saude.Available {
+		t.Fatal("downloader sem ffmpeg deveria estar indisponível")
+	}
+	if saude.Detail == "" {
+		t.Error("a falha deveria vir com um detalhe explicando o motivo")
+	}
+
+	ffmpeg, ok := ferramenta(saude.Tools, "ffmpeg")
+	if !ok {
+		t.Fatal("ffmpeg deveria aparecer na lista")
+	}
+	if !ffmpeg.Required {
+		t.Error("ffmpeg deveria ser obrigatório para o downloader")
+	}
+}
+
+// O papel padrão é o exigente: um provider montado sem Role explícita erra
+// para o lado de reportar uma falha a mais, nunca uma a menos.
+func TestHealthPapelPadraoEhDownloader(t *testing.T) {
+	provider := New(Config{
+		Binary:       binarioFalso(t, "yt-dlp", "2025.09.01"),
+		FFmpegBinary: filepath.Join(t.TempDir(), "ffmpeg-que-nao-existe"),
+	})
+
+	saude := provider.Health(context.Background())
+
+	if saude.Role != media.RoleDownloader {
+		t.Fatalf("papel padrão esperado %q, obtido %q", media.RoleDownloader, saude.Role)
+	}
+	if saude.Available {
+		t.Error("o padrão deveria exigir ffmpeg e reportar indisponível")
+	}
+}
+
+func ferramenta(lista []media.Tool, nome string) (media.Tool, bool) {
+	for _, item := range lista {
+		if item.Name == nome {
+			return item, true
+		}
+	}
+	return media.Tool{}, false
+}

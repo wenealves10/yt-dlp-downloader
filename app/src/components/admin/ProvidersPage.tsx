@@ -1,6 +1,13 @@
 import React from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, CheckCircle, Loader, XCircle } from "lucide-react";
+import {
+  AlertTriangle,
+  CheckCircle,
+  Clock,
+  Cpu,
+  Loader,
+  XCircle,
+} from "lucide-react";
 import { AdminShell } from "./AdminShell";
 import { useAuth } from "../../hooks/useAuth";
 
@@ -13,6 +20,7 @@ interface Ferramenta {
 
 interface ProviderSaude {
   provider: string;
+  role?: string;
   available: boolean;
   version?: string;
   detail?: string;
@@ -20,12 +28,167 @@ interface ProviderSaude {
   checked_at: string;
 }
 
-interface Resposta {
+/**
+ * Uma etapa é um dos processos que executam o provider. A API só resolve
+ * metadados; quem baixa e junta as faixas é o worker, em outra imagem e com
+ * outras dependências — daí os dois blocos separados na tela.
+ */
+interface Etapa {
+  role: string;
+  label: string;
+  source: string;
   providers: ProviderSaude[];
-  healthy: boolean;
+  available: boolean;
   detail?: string;
+  reported_at?: string;
+  stale: boolean;
+}
+
+interface Resposta {
+  stages: Etapa[];
+  healthy: boolean;
   platforms?: { id: string; label: string }[];
 }
+
+const ORIGEM: Record<string, string> = {
+  api: "container da API",
+  worker: "container do worker",
+};
+
+function formatarQuando(iso?: string): string | null {
+  if (!iso) return null;
+  const data = new Date(iso);
+  if (Number.isNaN(data.getTime())) return null;
+
+  const segundos = Math.round((Date.now() - data.getTime()) / 1000);
+  if (segundos < 60) return "agora há pouco";
+  if (segundos < 3600) return `há ${Math.floor(segundos / 60)} min`;
+  if (segundos < 86400) return `há ${Math.floor(segundos / 3600)} h`;
+  return data.toLocaleString("pt-BR");
+}
+
+const TabelaFerramentas: React.FC<{ ferramentas: Ferramenta[] }> = ({
+  ferramentas,
+}) => (
+  <div className="overflow-x-auto">
+    <table className="w-full text-sm">
+      <thead>
+        <tr className="text-left text-xs text-gray-400 uppercase tracking-wide">
+          <th className="pb-2 font-medium">Dependência</th>
+          <th className="pb-2 font-medium">Estado</th>
+          <th className="pb-2 font-medium">Versão</th>
+        </tr>
+      </thead>
+      <tbody className="divide-y divide-gray-700">
+        {ferramentas.map((ferramenta) => (
+          <tr key={ferramenta.name}>
+            <td className="py-2.5 pr-4 text-gray-200">
+              {ferramenta.name}
+              {!ferramenta.required && (
+                <span className="ml-2 text-xs text-gray-400">
+                  não usada nesta etapa
+                </span>
+              )}
+            </td>
+            <td className="py-2.5 pr-4">
+              {ferramenta.available ? (
+                <span className="text-green-400">disponível</span>
+              ) : (
+                <span
+                  className={
+                    ferramenta.required ? "text-red-400" : "text-gray-400"
+                  }
+                >
+                  ausente
+                </span>
+              )}
+            </td>
+            <td className="py-2.5 text-gray-400 font-mono text-xs">
+              {ferramenta.version || "—"}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+);
+
+const BlocoEtapa: React.FC<{ etapa: Etapa }> = ({ etapa }) => {
+  const quando = formatarQuando(etapa.reported_at);
+
+  return (
+    <section className="bg-gray-800 border border-gray-700 rounded-xl p-5">
+      <header className="flex flex-wrap items-start justify-between gap-3 mb-4">
+        <div>
+          <div className="flex items-center gap-3">
+            <h2 className="text-base font-semibold text-gray-100">
+              {etapa.label}
+            </h2>
+            <span
+              className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                etapa.available
+                  ? "bg-green-600/20 text-green-300 border border-green-700/50"
+                  : etapa.stale
+                    ? "bg-amber-600/20 text-amber-300 border border-amber-700/50"
+                    : "bg-red-600/20 text-red-300 border border-red-700/50"
+              }`}
+            >
+              {etapa.available ? (
+                <CheckCircle size={12} />
+              ) : etapa.stale ? (
+                <Clock size={12} />
+              ) : (
+                <XCircle size={12} />
+              )}
+              {etapa.available
+                ? "OK"
+                : etapa.stale
+                  ? "Sem relatório"
+                  : "Indisponível"}
+            </span>
+          </div>
+          <p className="mt-1 flex items-center gap-1.5 text-xs text-gray-400">
+            <Cpu size={12} />
+            {ORIGEM[etapa.source] ?? etapa.source}
+            {quando && <span>· verificado {quando}</span>}
+          </p>
+        </div>
+      </header>
+
+      {etapa.detail && (
+        <p
+          className={`mb-4 text-sm ${
+            etapa.stale ? "text-amber-300" : "text-red-300"
+          }`}
+        >
+          {etapa.detail}
+        </p>
+      )}
+
+      {etapa.providers.map((provider) => (
+        <div
+          key={`${etapa.role}-${provider.provider}`}
+          className="mt-4 first:mt-0 rounded-lg border border-gray-700/70 bg-gray-900/40 p-4"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <span className="text-sm font-medium text-gray-200">
+              {provider.provider}
+            </span>
+            {provider.version && (
+              <span className="text-xs text-gray-400 font-mono">
+                {provider.version}
+              </span>
+            )}
+          </div>
+          {provider.detail && (
+            <p className="mb-3 text-sm text-red-300">{provider.detail}</p>
+          )}
+          <TabelaFerramentas ferramentas={provider.tools ?? []} />
+        </div>
+      ))}
+    </section>
+  );
+};
 
 export const ProvidersPage: React.FC = () => {
   const { token } = useAuth();
@@ -45,10 +208,12 @@ export const ProvidersPage: React.FC = () => {
     refetchInterval: 60_000,
   });
 
+  const etapas = data?.stages ?? [];
+
   return (
     <AdminShell
       titulo="Mecanismo de download"
-      descricao="Estado dos providers e das dependências que eles usam."
+      descricao="Estado de cada etapa e das dependências que ela usa."
     >
       {isLoading && (
         <p className="flex items-center gap-2 text-gray-400">
@@ -76,92 +241,19 @@ export const ProvidersPage: React.FC = () => {
             )}
             <span>
               {data.healthy
-                ? "Todos os providers estão operacionais."
-                : "Há provider indisponível — downloads podem falhar."}
-              {data.detail && <span className="block mt-0.5">{data.detail}</span>}
+                ? "Resolução e download estão operacionais."
+                : "Há uma etapa com problema — veja qual delas abaixo."}
             </span>
           </div>
 
-          {data.providers.map((provider) => (
-            <section
-              key={provider.provider}
-              className="bg-gray-800 border border-gray-700 rounded-xl p-5"
-            >
-              <header className="flex flex-wrap items-center justify-between gap-3 mb-4">
-                <div className="flex items-center gap-3">
-                  <h2 className="text-base font-semibold text-gray-100">
-                    {provider.provider}
-                  </h2>
-                  <span
-                    className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                      provider.available
-                        ? "bg-green-600/20 text-green-300 border border-green-700/50"
-                        : "bg-red-600/20 text-red-300 border border-red-700/50"
-                    }`}
-                  >
-                    {provider.available ? (
-                      <CheckCircle size={12} />
-                    ) : (
-                      <XCircle size={12} />
-                    )}
-                    {provider.available ? "OK" : "Indisponível"}
-                  </span>
-                </div>
-                {provider.version && (
-                  <span className="text-sm text-gray-400 font-mono">
-                    {provider.version}
-                  </span>
-                )}
-              </header>
+          <p className="text-sm text-gray-400">
+            Resolver um link e baixá-lo acontecem em processos diferentes, com
+            dependências diferentes: a API só lê metadados, e o ffmpeg — que
+            junta vídeo e áudio — vive no worker, que é quem baixa.
+          </p>
 
-              {provider.detail && (
-                <p className="mb-4 text-sm text-red-300">{provider.detail}</p>
-              )}
-
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="text-left text-xs text-gray-500 uppercase tracking-wide">
-                      <th className="pb-2 font-medium">Dependência</th>
-                      <th className="pb-2 font-medium">Estado</th>
-                      <th className="pb-2 font-medium">Versão</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-700">
-                    {(provider.tools ?? []).map((ferramenta) => (
-                      <tr key={ferramenta.name}>
-                        <td className="py-2.5 pr-4 text-gray-200">
-                          {ferramenta.name}
-                          {!ferramenta.required && (
-                            <span className="ml-2 text-xs text-gray-500">
-                              opcional
-                            </span>
-                          )}
-                        </td>
-                        <td className="py-2.5 pr-4">
-                          {ferramenta.available ? (
-                            <span className="text-green-400">disponível</span>
-                          ) : (
-                            <span
-                              className={
-                                ferramenta.required
-                                  ? "text-red-400"
-                                  : "text-amber-400"
-                              }
-                            >
-                              ausente
-                            </span>
-                          )}
-                        </td>
-                        <td className="py-2.5 text-gray-400 font-mono text-xs">
-                          {ferramenta.version || "—"}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
+          {etapas.map((etapa) => (
+            <BlocoEtapa key={etapa.role} etapa={etapa} />
           ))}
 
           {data.platforms && data.platforms.length > 0 && (

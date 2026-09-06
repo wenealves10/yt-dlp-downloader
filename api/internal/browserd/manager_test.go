@@ -60,3 +60,41 @@ func TestRandomVNCPassword(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEqual(t, primeira, segunda)
 }
+
+func TestChromeArgsSandboxLigado(t *testing.T) {
+	manager := &Manager{cfg: Config{Width: 1440, Height: 900}}
+
+	args := manager.chromeArgs("/data/profiles/abc", 9222)
+
+	// Com o sandbox ligado não há motivo para desligá-lo nem para silenciar um
+	// aviso que o Chrome não vai emitir.
+	require.NotContains(t, args, "--no-sandbox")
+	require.NotContains(t, args, "--test-type")
+	require.Contains(t, args, "--user-data-dir=/data/profiles/abc")
+	// Nenhuma flag de automação: elas são o que faz o login do Google recusar.
+	require.NotContains(t, args, "--enable-automation")
+	require.NotContains(t, args, "--headless")
+}
+
+func TestChromeArgsSandboxDesligadoSilenciaOAviso(t *testing.T) {
+	manager := &Manager{cfg: Config{Width: 1440, Height: 900, DisableSandbox: true}}
+
+	args := manager.chromeArgs("/data/profiles/abc", 9222)
+
+	require.Contains(t, args, "--no-sandbox")
+	// Sem --test-type, o Chrome desenha uma faixa amarela no topo de toda
+	// janela; ela rouba altura da tela remota e alarma quem só quer fazer
+	// login. As duas andam juntas.
+	require.Contains(t, args, "--test-type")
+	require.NotContains(t, args, "--enable-automation")
+}
+
+func TestChromeArgsUsaAUrlDeLoginPorUltimo(t *testing.T) {
+	manager := &Manager{cfg: Config{Width: 1440, Height: 900}}
+
+	args := manager.chromeArgs("/data/profiles/abc", 9222)
+
+	// A URL fecha a lista: qualquer coisa depois dela seria interpretada como
+	// mais um argumento do processo.
+	require.Equal(t, startURL, args[len(args)-1])
+}

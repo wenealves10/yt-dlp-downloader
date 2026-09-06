@@ -14,6 +14,7 @@ const (
 	TypeYoutubeHealthCheckQueue = "youtube_health_check"
 	TypeDownloadMediaQueue      = "download_media"
 	TypeTempCleanupQueue        = "temp_cleanup"
+	TypeMediaHealthQueue        = "media_health"
 )
 
 const (
@@ -36,4 +37,5 @@ const (
 	QueueWeightYoutubeHealth    = 1
 	QueueWeightDownloadMedia    = 60
 	QueueWeightTempCleanup      = 1
+	QueueWeightMediaHealth      = 1
 )

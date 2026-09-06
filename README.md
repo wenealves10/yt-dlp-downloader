@@ -230,8 +230,28 @@ reenfileirados: um vídeo privado continuará privado na terceira tentativa.
 ### Diagnóstico
 
 `/admin/providers` mostra o estado do mecanismo — versão do yt-dlp, ffmpeg e
-runtime JavaScript, e quais estão ausentes. Para diagnóstico pela linha de
-comando existe `cmd/mediaprobe`, que fica fora das imagens de produção:
+runtime JavaScript, e quais estão ausentes.
+
+A tela separa **duas etapas**, porque elas rodam em processos e imagens
+diferentes:
+
+| Etapa | Processo | Precisa de ffmpeg? |
+| --- | --- | --- |
+| Resolução de metadados | API (`Dockerfile.server`) | Não — só executa `--dump-single-json` |
+| Download | Worker (`Dockerfile.worker`) | Sim — junta faixas separadas e converte para MP3 |
+
+O painel roda na API, então executar o diagnóstico ali não diria nada sobre o
+worker. Em vez disso o worker publica seu relatório no Redis
+(`media:health:downloader`, TTL de 10 min, republicado na subida e a cada 5 min)
+e a API o lê. O TTL é o que faz um worker parado aparecer como *sem relatório*
+em vez de continuar saudável para sempre.
+
+Isso também é o motivo de a API não trazer ffmpeg: `Role` no `ytdlp.Config`
+distingue os dois papéis, e cobrar a dependência do processo que nunca a executa
+reportaria como falha algo que nunca quebrou.
+
+Para diagnóstico pela linha de comando existe `cmd/mediaprobe`, que fica fora
+das imagens de produção:
 
 ```sh
 go run ./cmd/mediaprobe health
@@ -471,6 +491,13 @@ user namespaces. Manter o sandbox exigiria `CAP_SYS_ADMIN`, que é bem pior para
 o host do que desligá-lo dentro de um container de propósito único, sem root e
 sem porta publicada. O `build-images.sh` recusa buildar com
 `BROWSER_DISABLE_SANDBOX` diferente de `true`.
+
+Quando o sandbox está desligado, o serviço passa `--test-type` junto. Sem ele o
+Chrome desenha uma faixa amarela — *"You are using an unsupported command-line
+flag: --no-sandbox"* — no topo de toda janela: ela rouba ~56px da tela remota e
+alarma quem só está fazendo login, sendo que o aviso é para quem opera e já está
+dito aqui. A flag não é de automação: `navigator.webdriver` continua `false`, não
+há `--enable-automation`, e o login do Google segue normal.
 
 ### Deploy antigo (x86, ghcr.io)
 

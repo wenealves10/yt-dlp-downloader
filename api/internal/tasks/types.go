@@ -17,4 +17,5 @@ const (
 	// subiu.
 	TypeDownloadMedia = "download:media"
 	TypeTempCleanup   = "media:temp:cleanup"
+	TypeMediaHealth   = "media:health:report"
 )

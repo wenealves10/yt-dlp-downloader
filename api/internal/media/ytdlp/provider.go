@@ -26,6 +26,10 @@ type Config struct {
 	MetadataTimeout time.Duration
 	// DownloadTimeout é o teto de um download inteiro.
 	DownloadTimeout time.Duration
+	// Role diz o que este processo faz com o provider. O padrão é downloader,
+	// que é o exigente: errar para o lado estrito reporta uma falha a mais, e
+	// não uma a menos.
+	Role media.Role
 }
 
 // Provider implementa media.Provider sobre o yt-dlp.
@@ -50,6 +54,9 @@ func New(cfg Config) *Provider {
 	}
 	if cfg.DownloadTimeout <= 0 {
 		cfg.DownloadTimeout = 2 * time.Hour
+	}
+	if cfg.Role == "" {
+		cfg.Role = media.RoleDownloader
 	}
 
 	return &Provider{
@@ -109,7 +116,7 @@ func (p *Provider) argsBase() []string {
 
 // Health verifica o binário e as dependências que o download usa.
 func (p *Provider) Health(ctx context.Context) media.Health {
-	saude := media.Health{Provider: p.Name(), CheckedAt: time.Now().UTC()}
+	saude := media.Health{Provider: p.Name(), Role: p.cfg.Role, CheckedAt: time.Now().UTC()}
 
 	versao, err := p.runner.versao(ctx)
 	if err != nil {
@@ -124,13 +131,15 @@ func (p *Provider) Health(ctx context.Context) media.Health {
 		{Name: "yt-dlp", Available: saude.Available, Version: saude.Version, Required: true},
 	}
 
-	// ffmpeg junta vídeo e áudio separados e converte para MP3. Sem ele, boa
-	// parte das resoluções altas do YouTube fica indisponível.
+	// ffmpeg junta vídeo e áudio separados e converte para MP3 — no processo
+	// que BAIXA. Quem só resolve metadados nunca o executa, e exigi-lo ali
+	// pintaria de vermelho um processo perfeitamente saudável.
+	precisaFFmpeg := p.cfg.Role == media.RoleDownloader
 	versaoFFmpeg, erroFFmpeg := versaoDe(ctx, p.cfg.FFmpegBinary, "-version")
 	saude.Tools = append(saude.Tools, media.Tool{
-		Name: "ffmpeg", Available: erroFFmpeg == nil, Version: versaoFFmpeg, Required: true,
+		Name: "ffmpeg", Available: erroFFmpeg == nil, Version: versaoFFmpeg, Required: precisaFFmpeg,
 	})
-	if erroFFmpeg != nil {
+	if erroFFmpeg != nil && precisaFFmpeg {
 		saude.Available = false
 		if saude.Detail == "" {
 			saude.Detail = "ffmpeg indisponível: faixas separadas não podem ser unidas"
