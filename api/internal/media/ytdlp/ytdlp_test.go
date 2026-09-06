@@ -472,3 +472,93 @@ func TestArgsMetadataSemSessaoNaoPassaCookies(t *testing.T) {
 
 	require.NotContains(t, args, "--cookies")
 }
+
+// Impersonação só onde é preciso: o YouTube funciona sem ela, e ligá-la em toda
+// plataforma só somaria uma dependência ao caminho crítico.
+func TestImpersonacaoApenasNasPlataformasQueExigem(t *testing.T) {
+	exigem := []media.Platform{
+		media.PlatformReddit, media.PlatformTwitter, media.PlatformPinterest,
+		media.PlatformVimeo, media.PlatformDailymotion,
+	}
+	for _, plataforma := range exigem {
+		require.True(t, plataformasQueExigemImpersonacao[plataforma], plataforma)
+	}
+
+	naoExigem := []media.Platform{
+		media.PlatformYouTube, media.PlatformTwitch, media.PlatformLinkedIn,
+		media.PlatformSoundCloud, media.PlatformUnknown,
+	}
+	for _, plataforma := range naoExigem {
+		require.False(t, plataformasQueExigemImpersonacao[plataforma], plataforma)
+	}
+}
+
+// O User-Agent próprio e a impersonação são incompatíveis: imitando o Chrome, o
+// yt-dlp já envia o cabeçalho correspondente, e sobrescrevê-lo deixaria o
+// handshake e o User-Agent contando histórias diferentes — o que é, por si só,
+// sinal de automação.
+func TestArgsBaseNaoMisturaUserAgentComImpersonacao(t *testing.T) {
+	provider := New(Config{Binary: binarioFalso(t, "yt-dlp", "2025.09.01"), UserAgent: "UA-do-projeto"})
+
+	// Numa plataforma que não impersona, o User-Agent configurado vale.
+	semImpersonacao := provider.argsBase(media.PlatformYouTube)
+	require.Contains(t, semImpersonacao, "--user-agent")
+	require.Contains(t, semImpersonacao, "UA-do-projeto")
+
+	// Onde impersona, os dois nunca aparecem juntos.
+	comImpersonacao := provider.argsBase(media.PlatformReddit)
+	if contemArg(comImpersonacao, "--impersonate") {
+		require.NotContains(t, comImpersonacao, "--user-agent",
+			"User-Agent próprio e impersonação não podem coexistir")
+	}
+}
+
+// `--impersonate` com alvo indisponível é ERRO FATAL no yt-dlp, não aviso. Uma
+// imagem construída sem o extra curl-cffi não pode ter todo download das
+// plataformas da lista quebrado por causa disso.
+func TestSemSuporteNaoPassaImpersonacao(t *testing.T) {
+	// Um binário que não entende --list-impersonate-targets: a sondagem falha
+	// e a impersonação fica desligada.
+	provider := New(Config{Binary: filepath.Join(t.TempDir(), "binario-que-nao-existe")})
+
+	require.Empty(t, provider.argsImpersonacao(media.PlatformReddit))
+	require.False(t, provider.usaImpersonacao(media.PlatformReddit))
+}
+
+func contemArg(args []string, alvo string) bool {
+	for _, arg := range args {
+		if arg == alvo {
+			return true
+		}
+	}
+	return false
+}
+
+// A sondagem é por provider: um binário sem suporte não pode contaminar outro
+// que tenha, nem o resultado depender de qual teste rodou primeiro.
+func TestSondagemDeImpersonacaoEhPorProvider(t *testing.T) {
+	semSuporte := New(Config{Binary: filepath.Join(t.TempDir(), "inexistente")})
+	require.False(t, semSuporte.suportaImpersonacao())
+
+	// Um binário que responde à sondagem listando alvos de Chrome.
+	comSuporte := New(Config{
+		Binary: binarioFalso(t, "yt-dlp", "Chrome-136      Macos-15     curl_cffi"),
+	})
+	require.True(t, comSuporte.suportaImpersonacao())
+	require.Contains(t, comSuporte.argsImpersonacao(media.PlatformReddit), "--impersonate")
+
+	// E o primeiro continua sem suporte depois disso.
+	require.False(t, semSuporte.suportaImpersonacao())
+	require.Empty(t, semSuporte.argsImpersonacao(media.PlatformReddit))
+}
+
+// Mesmo com suporte, plataforma fora da lista não recebe o argumento.
+func TestImpersonacaoNaoVazaParaPlataformaForaDaLista(t *testing.T) {
+	provider := New(Config{
+		Binary: binarioFalso(t, "yt-dlp", "Chrome-136      Macos-15     curl_cffi"),
+	})
+
+	require.Empty(t, provider.argsImpersonacao(media.PlatformYouTube))
+	require.NotContains(t, provider.argsBase(media.PlatformYouTube), "--impersonate")
+	require.Contains(t, provider.argsBase(media.PlatformReddit), "--impersonate")
+}

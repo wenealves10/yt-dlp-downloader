@@ -3,6 +3,7 @@ package ytdlp
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -99,7 +100,7 @@ func (p *Provider) Download(
 // argsArquivo monta os argumentos do download. Tudo estruturado: nenhuma parte
 // vem de concatenação com entrada do usuário.
 func (p *Provider) argsArquivo(req media.Request, saidaAbs string) []string {
-	args := p.argsBase()
+	args := p.argsBase(plataformaDaURL(req.URL))
 
 	// --newline força uma linha por atualização; sem isso o yt-dlp reescreve a
 	// mesma linha com \r e o scanner nunca entrega nada.
@@ -144,6 +145,17 @@ func (p *Provider) argsArquivo(req media.Request, saidaAbs string) []string {
 	// O "--" encerra as opções: o que vier depois é tratado como URL, mesmo que
 	// comece com hífen.
 	return append(args, "--", req.URL)
+}
+
+// plataformaDaURL identifica a plataforma da URL já normalizada. Um erro aqui
+// não impede o download: só faz o provider tratá-la como desconhecida, o que é
+// o comportamento mais conservador.
+func plataformaDaURL(bruta string) media.Platform {
+	alvo, err := url.Parse(bruta)
+	if err != nil {
+		return media.PlatformUnknown
+	}
+	return media.PlatformFor(alvo)
 }
 
 // seletorVideo monta a cadeia de alternativas do `-f`.

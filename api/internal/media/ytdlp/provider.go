@@ -37,6 +37,9 @@ type Provider struct {
 	cfg      Config
 	runner   *runner
 	download *runner
+	// impersonacao é sondada sob demanda e guardada aqui: é caro descobrir e
+	// não muda enquanto o processo viver.
+	impersonacao deteccaoImpersonacao
 }
 
 // New monta o provider. Não valida o binário aqui de propósito: o serviço deve
@@ -84,7 +87,10 @@ func (p *Provider) CanHandle(parsed *url.URL) bool {
 }
 
 // argsBase são as opções comuns a metadados e download.
-func (p *Provider) argsBase() []string {
+// argsBase monta os argumentos comuns. A plataforma entra porque duas decisões
+// dependem dela: imitar ou não um navegador, e enviar ou não o nosso
+// User-Agent — as duas são incompatíveis entre si.
+func (p *Provider) argsBase(plataforma media.Platform) []string {
 	args := []string{
 		// Sem cor e sem barra de progresso interativa: a saída é lida por
 		// máquina.
@@ -104,7 +110,12 @@ func (p *Provider) argsBase() []string {
 	if p.cfg.ProxyURL != "" {
 		args = append(args, "--proxy", p.cfg.ProxyURL)
 	}
-	if p.cfg.UserAgent != "" {
+
+	args = append(args, p.argsImpersonacao(plataforma)...)
+
+	// Sob impersonação o User-Agent vem do próprio alvo imitado; sobrescrevê-lo
+	// deixaria o handshake e o cabeçalho contando histórias diferentes.
+	if p.cfg.UserAgent != "" && !p.usaImpersonacao(plataforma) {
 		args = append(args, "--user-agent", p.cfg.UserAgent)
 	}
 	if p.cfg.Referer != "" {
@@ -160,6 +171,18 @@ func (p *Provider) Health(ctx context.Context) media.Health {
 			saude.Detail = "ffmpeg indisponível: faixas separadas não podem ser unidas"
 		}
 	}
+
+	// Impersonação de navegador. Sem ela, Reddit, X e Pinterest respondem
+	// `403: Blocked` mesmo com sessão autenticada, porque o bloqueio é por
+	// fingerprint de TLS e acontece antes de qualquer cookie ser olhado.
+	temImpersonacao := p.suportaImpersonacao()
+	saude.Tools = append(saude.Tools, media.Tool{
+		Name:      "impersonação (curl-cffi)",
+		Available: temImpersonacao,
+		Required:  false,
+		Usage:     media.UsageOptional,
+		Note:      "imita o handshake de um navegador; sem ela Reddit, X e Pinterest recusam o acesso",
+	})
 
 	// O runtime JavaScript resolve o desafio "n" do YouTube, e é executado nas
 	// DUAS etapas: quem só lê metadados também precisa dele para uma requisição

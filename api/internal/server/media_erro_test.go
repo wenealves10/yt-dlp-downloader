@@ -1,7 +1,9 @@
 package server
 
 import (
+	"fmt"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -53,9 +55,59 @@ func TestRespostaDeErroEscondeDetalheDoUsuarioComum(t *testing.T) {
 		if _, existe := corpo["detail"]; existe {
 			t.Errorf("[%s] o detalhe técnico não pode sair para este papel", papel)
 		}
-		if corpo["error"] != media.ErrBlocked.Error() {
-			t.Errorf("[%s] a mensagem de domínio deveria continuar", papel)
+		// A mensagem de domínio diz "a partir deste servidor". Isso é nosso.
+		if corpo["error"] != media.PublicMessage(erro) {
+			t.Errorf("[%s] deveria receber a mensagem pública, obteve %v", papel, corpo["error"])
 		}
+		if corpo["code"] != "unavailable" {
+			t.Errorf("[%s] o código deveria ser colapsado, obteve %v", papel, corpo["code"])
+		}
+	}
+}
+
+// A regra dura, verificada no corpo inteiro da resposta: nada que descreva a
+// nossa infraestrutura pode sair para quem não é super admin.
+func TestRespostaDeErroNaoVazaInternoParaNaoAdmin(t *testing.T) {
+	erros := []*media.Error{
+		{Kind: media.ErrBlocked, Detail: "HTTP Error 403: Blocked"},
+		{Kind: media.ErrNetwork, Detail: "connection refused"},
+		{Kind: media.ErrProviderUnavailable, Detail: "exec: yt-dlp not found"},
+		{Kind: media.ErrDownloadFailed, Detail: "ERROR: [Reddit] cookies inválidos"},
+	}
+	proibidos := []string{"servidor", "provider", "sess", "cookie", "yt-dlp", "403", "reddit"}
+
+	for _, erro := range erros {
+		for _, papel := range []db.CoreUserRole{db.CoreUserRoleUser, db.CoreUserRoleAdmin} {
+			corpo := respostaDeErro(contextoComUsuario(db.User{Role: papel}, true), erro)
+
+			var junto string
+			for _, valor := range corpo {
+				junto += " " + strings.ToLower(fmt.Sprint(valor))
+			}
+			for _, termo := range proibidos {
+				if strings.Contains(junto, termo) {
+					t.Errorf("[%s/%v] a resposta vazou %q: %s", papel, erro.Kind, termo, junto)
+				}
+			}
+		}
+	}
+}
+
+// E o super admin continua vendo tudo — sem isso, diagnosticar exige entrar no
+// container.
+func TestSuperAdminContinuaVendoOMotivoPreciso(t *testing.T) {
+	erro := &media.Error{Kind: media.ErrBlocked, Detail: "HTTP Error 403: Blocked"}
+
+	corpo := respostaDeErro(contextoComUsuario(db.User{Role: db.CoreUserRoleSuperAdmin}, true), erro)
+
+	if corpo["error"] != media.UserMessage(erro) {
+		t.Errorf("o super admin deveria ver a mensagem precisa, obteve %v", corpo["error"])
+	}
+	if corpo["code"] != "blocked" {
+		t.Errorf("o código não deveria ser colapsado para o super admin, obteve %v", corpo["code"])
+	}
+	if corpo["detail"] != erro.Detail {
+		t.Errorf("o detalhe deveria estar presente, obteve %v", corpo["detail"])
 	}
 }
 

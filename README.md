@@ -300,13 +300,43 @@ traduz para erros de domínio (`ErrContentPrivate`, `ErrGeoBlocked`,
 estável, e o detalhe técnico fica no log. Erros de conteúdo não são
 reenfileirados: um vídeo privado continuará privado na terceira tentativa.
 
-### Por que falhou
+### Duas camadas de mensagem
 
-A saída bruta do yt-dlp nunca chega ao usuário, mas esconder o motivo de **quem
-opera** transformava todo problema em adivinhação: um 403 da plataforma, um
-provider quebrado e um vídeo removido viravam a mesma frase na tela.
+**Regra dura: nada da nossa infraestrutura chega ao cliente final.** Ele não
+pode saber que existe servidor, provider, sessão gerenciada ou plataforma
+recusando alguma coisa. Para ele a falha é do produto, e a única informação útil
+é o que fazer a seguir.
 
-Duas informações são anexadas à resposta de erro **apenas para o super admin**:
+Por isso cada erro de domínio tem duas mensagens, em tabelas separadas:
+
+| | Quem lê | Exemplo (`ErrBlocked`) |
+| --- | --- | --- |
+| `UserMessage` | log e super admin | "a plataforma recusou o acesso a partir deste servidor" |
+| `PublicMessage` | **todo mundo** | "Não foi possível baixar este conteúdo agora. Tente novamente mais tarde." |
+
+`PublicMessage` é a única que pode aparecer em resposta de API, no histórico ou
+num evento de tempo real. Erros sobre o **conteúdo** (privado, ao vivo,
+indisponível) continuam explícitos: não revelam nada nosso e são justamente o
+que a pessoa precisa saber para parar de tentar.
+
+Os códigos de erro seguem a mesma regra: `blocked`, `network` e
+`provider_unavailable` chegam colapsados em `unavailable` para quem não é super
+admin — a distinção entre eles é nossa. `internal/media/vazamento_test.go`
+verifica termo a termo que nenhuma mensagem pública cita interno, e o teste
+falha antes de a frase errada chegar a um cliente.
+
+O padrão de `respostaDeErro` é o mais restrito: qualquer caminho que esqueça de
+identificar o usuário cai no ramo público, nunca no que expõe interno. A tela
+tem a mesma barreira do seu lado — não desenha os campos de diagnóstico para
+quem não é super admin, para que um erro futuro de um dos lados não vire
+vazamento sozinho.
+
+### Por que falhou (só para o super admin)
+
+Esconder o motivo de **quem opera** transformava todo problema em adivinhação:
+um 403 da plataforma, um provider quebrado e um vídeo removido viravam a mesma
+frase na tela. Duas informações são anexadas à resposta de erro **apenas para o
+super admin**:
 
 - `detail` — o resumo do stderr (4 linhas, 500 caracteres, avisos removidos);
 - `session` — se a conta gerenciada chegou a ser usada, e qual. É a primeira
@@ -324,6 +354,27 @@ A tabela em `errors.go` cobre também o que antes caía no genérico:
 
 A ordem da tabela importa: 429 e "login required" vêm antes, porque são causas
 mais específicas para respostas da mesma família.
+
+### Impersonação de navegador
+
+Reddit, X e Pinterest respondem `HTTP Error 403: Blocked` já na **primeira**
+requisição, antes de olhar cookie nenhum — por isso ter conta autenticada não
+resolvia sozinho. O bloqueio é por fingerprint de TLS, e a resposta é imitar o
+handshake de um navegador real (`--impersonate`, via o extra `curl-cffi`).
+
+É por plataforma, não global: o YouTube funciona sem isso, e impersonar onde não
+é preciso só adiciona uma dependência ao caminho crítico. Sob impersonação o
+`--user-agent` configurado é **suprimido** — o yt-dlp já envia o do navegador
+imitado, e sobrescrevê-lo deixaria handshake e cabeçalho contando histórias
+diferentes, que é por si só sinal de automação.
+
+O suporte é sondado uma vez por provider (`--list-impersonate-targets`) porque
+`--impersonate` com alvo indisponível é **erro fatal**, não aviso: sem a
+sondagem, uma imagem construída sem `curl-cffi` quebraria todo download dessas
+plataformas. O painel de providers mostra se está ativa.
+
+Se mesmo assim a plataforma recusar, o bloqueio é da faixa de IP e nenhuma
+mudança na aplicação resolve — aí a saída é a variável `PROXY_URL`.
 
 ### Diagnóstico
 

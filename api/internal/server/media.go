@@ -61,7 +61,7 @@ func (s *Server) resolveMedia(ctx *gin.Context) {
 
 	if s.mediaRegistry == nil {
 		ctx.JSON(http.StatusServiceUnavailable,
-			errorResponse(errors.New("o mecanismo de download está indisponível")))
+			errorResponse(errors.New(media.PublicMessage(media.ErrProviderUnavailable))))
 		return
 	}
 
@@ -86,7 +86,8 @@ func (s *Server) resolveMedia(ctx *gin.Context) {
 		corpo := respostaDeErro(ctx, err)
 		// A primeira pergunta quando falha numa plataforma que exige login é
 		// "a conta que eu cadastrei foi usada?". Sem responder isso, o
-		// administrador não tem por onde começar.
+		// administrador não tem por onde começar — e o cliente final não pode
+		// nem saber que existe conta gerenciada.
 		if user, ok := currentUser(ctx); ok && user.Role == db.CoreUserRoleSuperAdmin {
 			corpo["session"] = sessao.Descricao()
 		}
@@ -155,7 +156,7 @@ func (s *Server) createMediaDownload(ctx *gin.Context) {
 func (s *Server) criarDownloadMedia(ctx *gin.Context, req criarDownloadMediaRequest) {
 	if s.mediaRegistry == nil {
 		ctx.JSON(http.StatusServiceUnavailable,
-			errorResponse(errors.New("o mecanismo de download está indisponível")))
+			errorResponse(errors.New(media.PublicMessage(media.ErrProviderUnavailable))))
 		return
 	}
 
@@ -536,17 +537,39 @@ func (s *Server) limiteExcedido(user db.User, tamanho int64) (gin.H, bool) {
 // concluir o download" e saber que a plataforma respondeu 403 ao IP do
 // servidor. Sem isso, diagnosticar exige entrar no container e ler log.
 func respostaDeErro(ctx *gin.Context, err error) gin.H {
+	// O padrão é o mais restrito. Qualquer caminho que esqueça de identificar o
+	// usuário cai aqui, e não no ramo que expõe interno.
 	corpo := gin.H{
-		"error": media.UserMessage(err),
-		"code":  codigoErro(err),
+		"error": media.PublicMessage(err),
+		"code":  codigoPublico(err),
 	}
 
-	if user, ok := currentUser(ctx); ok && user.Role == db.CoreUserRoleSuperAdmin {
-		if detalhe := media.Detail(err); detalhe != "" {
-			corpo["detail"] = detalhe
-		}
+	user, ok := currentUser(ctx)
+	if !ok || user.Role != db.CoreUserRoleSuperAdmin {
+		return corpo
+	}
+
+	// Só a partir daqui existe informação nossa na resposta.
+	corpo["error"] = media.UserMessage(err)
+	corpo["code"] = codigoErro(err)
+	if detalhe := media.Detail(err); detalhe != "" {
+		corpo["detail"] = detalhe
 	}
 	return corpo
+}
+
+// codigoPublico colapsa os códigos que descrevem a NOSSA infraestrutura em um
+// só. "blocked" e "provider_unavailable" contam ao cliente final que existe um
+// servidor sendo recusado e um mecanismo de download por trás — informação que
+// não é dele. Os códigos sobre o conteúdo continuam distintos: são o que
+// permite à tela dar uma orientação útil.
+func codigoPublico(err error) string {
+	switch codigoErro(err) {
+	case "blocked", "network", "provider_unavailable":
+		return "unavailable"
+	default:
+		return codigoErro(err)
+	}
 }
 
 // statusPara traduz o erro de domínio para o código HTTP correspondente.

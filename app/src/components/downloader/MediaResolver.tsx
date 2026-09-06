@@ -11,37 +11,42 @@ interface Props {
   bloqueado: boolean;
 }
 
-// dicaPorCodigo transforma o erro em uma orientação prática. O código é
-// estável; a mensagem do servidor pode mudar sem quebrar isto.
+// dicaPorCodigo transforma o erro em uma orientação prática.
+//
+// Toda frase aqui é lida pelo CLIENTE FINAL, então nenhuma pode descrever a
+// nossa infraestrutura: nada de servidor, provider, sessão ou plataforma
+// recusando alguma coisa. O que sobra é o que a pessoa pode fazer a respeito —
+// e quando não há nada que ela possa fazer, a dica fica vazia em vez de
+// inventar uma explicação.
+//
+// Os códigos de infraestrutura chegam colapsados em "unavailable" para quem não
+// é super admin; a distinção entre eles é nossa.
 function dicaPorCodigo(codigo: string): string {
   switch (codigo) {
     case "unsupported_platform":
-      return "Confira se o link é de um vídeo público de uma plataforma suportada.";
+      return "Confira se o link é de um vídeo público de um site suportado.";
     case "content_private":
     case "auth_required":
-      return "Só conseguimos baixar conteúdo público.";
+      return "Só é possível baixar conteúdo público.";
     case "live_content":
       return "Tente novamente quando a transmissão terminar.";
-    case "geo_blocked":
-      return "O conteúdo está bloqueado para a região do servidor.";
     case "rate_limited":
-      return "A plataforma pediu uma pausa. Tente de novo em alguns minutos.";
+      return "Tente de novo em alguns minutos.";
     case "invalid_url":
       return "Cole o endereço completo do vídeo.";
-    case "blocked":
-      // O caso do IP de datacenter: a plataforma atende de uma conexão
-      // residencial e recusa a do servidor. Uma sessão autenticada é o que
-      // devolve o acesso.
-      return "A plataforma recusou o servidor. Uma conta autenticada dessa plataforma costuma resolver.";
-    case "network":
-      return "O servidor não conseguiu alcançar a plataforma. Tente de novo em instantes.";
+    case "format_unavailable":
+      return "Escolha outra qualidade.";
     default:
       return "";
   }
 }
 
 export const MediaResolver: React.FC<Props> = ({ aoCriar, bloqueado }) => {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
+  // Segunda barreira. A API já só envia estes campos ao super admin; a tela
+  // também não os desenha para mais ninguém, para que um erro futuro de um lado
+  // não vire vazamento sozinho.
+  const superAdmin = user?.role === "super_admin";
 
   const [url, setUrl] = useState("");
   const [resolvendo, setResolvendo] = useState(false);
@@ -139,12 +144,12 @@ export const MediaResolver: React.FC<Props> = ({ aoCriar, bloqueado }) => {
               {erro.dica && (
                 <span className="block text-red-300/70 mt-0.5">{erro.dica}</span>
               )}
-              {erro.sessao && (
+              {superAdmin && erro.sessao && (
                 <span className="block text-red-300/60 mt-1.5 text-xs">
                   Sessão: {erro.sessao}
                 </span>
               )}
-              {erro.detalhe && (
+              {superAdmin && erro.detalhe && (
                 <span className="block mt-1.5 text-xs font-mono text-red-300/60 break-words">
                   {erro.detalhe}
                 </span>

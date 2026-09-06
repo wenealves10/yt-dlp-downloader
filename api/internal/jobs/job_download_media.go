@@ -333,9 +333,14 @@ func (p *JobDownloadMedia) registrarFalha(ctx context.Context, download db.Downl
 		status = db.CoreDownloadStatusCANCELED
 	}
 
-	mensagem := media.UserMessage(err)
-	log.Printf("jobs: download falhou id=%s plataforma=%s status=%s erro=%v",
-		download.ID, download.Platform, status, err)
+	// O histórico e o evento de tempo real são lidos pelo CLIENTE FINAL. Só a
+	// mensagem pública entra aí; o motivo técnico fica no log, que é nosso.
+	mensagem := media.PublicMessage(err)
+	log.Printf("jobs: download falhou id=%s plataforma=%s status=%s motivo=%q erro=%v",
+		download.ID, download.Platform, status, media.UserMessage(err), err)
+	if detalhe := media.Detail(err); detalhe != "" {
+		log.Printf("jobs: detalhe id=%s: %s", download.ID, detalhe)
+	}
 
 	if erroGravacao := p.store.MarkDownloadFinished(gravacaoCtx, db.MarkDownloadFinishedParams{
 		ID:           download.ID,

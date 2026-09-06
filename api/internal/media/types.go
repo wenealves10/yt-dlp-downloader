@@ -250,6 +250,55 @@ func (e *Error) Error() string {
 
 func (e *Error) Unwrap() error { return e.Kind }
 
+// mensagensPublicas é o que o USUÁRIO FINAL pode ler. É uma tabela separada, e
+// não uma variação das mensagens de domínio, porque as duas respondem a
+// perguntas diferentes.
+//
+// A mensagem de domínio é escrita para quem opera: ela distingue "a plataforma
+// recusou este servidor" de "o mecanismo de download está indisponível", e essa
+// precisão é o que permite agir. Nada disso pode chegar ao cliente final: ele
+// não tem por que saber que existe servidor, provider, sessão ou plataforma
+// recusando alguma coisa. Para ele a falha é do produto, e a única informação
+// útil é o que fazer a seguir.
+//
+// Erros sobre o CONTEÚDO (privado, ao vivo, indisponível) continuam explícitos:
+// não revelam nada da infraestrutura e são justamente o que a pessoa precisa
+// saber para parar de tentar.
+var mensagensPublicas = map[error]string{
+	ErrInvalidURL:          "O link informado não é válido.",
+	ErrUnsupportedPlatform: "Não é possível baixar conteúdo deste site.",
+	ErrContentUnavailable:  "Este conteúdo não está disponível.",
+	ErrContentPrivate:      "Este conteúdo é privado.",
+	ErrAuthRequired:        "Este conteúdo não está público.",
+	ErrGeoBlocked:          "Este conteúdo não está disponível.",
+	ErrLiveContent:         "Não é possível baixar transmissões ao vivo.",
+	ErrFormatUnavailable:   "Esta qualidade não está disponível para este conteúdo.",
+	ErrRateLimited:         "Tente novamente em alguns minutos.",
+	ErrBlocked:             "Não foi possível baixar este conteúdo agora. Tente novamente mais tarde.",
+	ErrNetwork:             "Não foi possível baixar este conteúdo agora. Tente novamente em instantes.",
+	ErrTimeout:             "O download demorou mais do que o esperado. Tente novamente.",
+	ErrCanceled:            "Download cancelado.",
+	ErrProviderUnavailable: "O serviço está temporariamente indisponível. Tente novamente em instantes.",
+	ErrDownloadFailed:      "Não foi possível concluir o download.",
+}
+
+// PublicMessage é a ÚNICA mensagem que pode chegar a um usuário comum.
+//
+// Use esta função em tudo que o cliente final lê: resposta de API, mensagem
+// gravada no histórico, evento de tempo real. UserMessage é para log e para o
+// painel do super admin, e trocar as duas vaza informação nossa.
+func PublicMessage(err error) string {
+	if err == nil {
+		return ""
+	}
+	for conhecido, mensagem := range mensagensPublicas {
+		if errors.Is(err, conhecido) {
+			return mensagem
+		}
+	}
+	return mensagensPublicas[ErrDownloadFailed]
+}
+
 // Detail devolve o detalhe técnico do erro, quando existe: é o resumo do stderr
 // que o provider capturou. NÃO é para o usuário comum — a mensagem dele é
 // UserMessage. Serve para o log e para o super admin, que precisa saber o que a
