@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -60,23 +61,22 @@ func TestNormalizarFormatosReduzOExcesso(t *testing.T) {
 		{FormatID: "136", Ext: "mp4", Height: 720, Width: 1280, VCodec: "avc1", ACodec: "none", TBR: 2000},
 		{FormatID: "140", Ext: "m4a", VCodec: "none", ACodec: "mp4a.40.2", ABR: 128, Filesize: 50},
 		{FormatID: "251", Ext: "webm", VCodec: "none", ACodec: "opus", ABR: 160},
-		// Streaming não produz arquivo final utilizável aqui.
+		// HLS é uma opção legítima: o yt-dlp baixa os fragmentos e remuxa. Este
+		// caso já foi tratado como descartável, e era o que zerava a lista
+		// inteira nas plataformas que só servem streaming.
 		{FormatID: "hls-1", Ext: "mp4", Height: 480, VCodec: "avc1", Protocol: "m3u8_native"},
 	}
 
 	formatos := normalizarFormatos(brutos)
 
-	require.Len(t, formatos, 3, "1080p, 720p e áudio")
+	require.Len(t, formatos, 4, "1080p, 720p, 480p e áudio")
 	// Maior resolução primeiro: é a escolha mais comum.
 	require.Equal(t, "1080p", formatos[0].Label)
 	require.Equal(t, "137", formatos[0].ID, "entre dois 1080p vence o de maior taxa de bits")
 	require.Equal(t, "720p", formatos[1].Label)
-	require.Equal(t, media.KindAudio, formatos[2].Kind)
-	require.Equal(t, "251", formatos[2].ID, "vence o áudio de maior bitrate")
-
-	for _, formato := range formatos {
-		require.NotContains(t, formato.ID, "hls")
-	}
+	require.Equal(t, "480p", formatos[2].Label)
+	require.Equal(t, media.KindAudio, formatos[3].Kind)
+	require.Equal(t, "251", formatos[3].ID, "vence o áudio de maior bitrate")
 	require.Equal(t, "avc1", formatos[0].VideoCodec, "o codec longo é encurtado")
 }
 
@@ -285,4 +285,103 @@ func ferramenta(lista []media.Tool, nome string) (media.Tool, bool) {
 		}
 	}
 	return media.Tool{}, false
+}
+
+// O bug que zerava a lista: Vimeo, Dailymotion, Pinterest, Reddit e X servem
+// SÓ HLS. Descartar formatos segmentados deixava o conteúdo sem nenhuma opção,
+// e o download terminava em "o formato escolhido não está disponível".
+func TestNormalizarFormatosAceitaHLS(t *testing.T) {
+	// Saída real do Dailymotion: três formatos, todos m3u8_native, todos já com
+	// áudio embutido.
+	brutos := []formatoJSON{
+		{FormatID: "hls-380", Ext: "mp4", Height: 288, Protocol: "m3u8_native", VCodec: "avc1.42001e", ACodec: "mp4a.40.2", TBR: 380},
+		{FormatID: "hls-480", Ext: "mp4", Height: 480, Protocol: "m3u8_native", VCodec: "avc1.64001f", ACodec: "mp4a.40.2", TBR: 480},
+		{FormatID: "hls-720", Ext: "mp4", Height: 720, Protocol: "m3u8_native", VCodec: "avc1.64001f", ACodec: "mp4a.40.2", TBR: 720},
+	}
+
+	formatos := normalizarFormatos(brutos)
+
+	require.Len(t, formatos, 3, "nenhum formato HLS pode ser descartado")
+	require.Equal(t, "hls-720", formatos[0].ID, "a maior resolução vem primeiro")
+	require.Equal(t, 720, formatos[0].Height)
+}
+
+// DASH também é segmentado e também conta.
+func TestNormalizarFormatosAceitaDASH(t *testing.T) {
+	brutos := []formatoJSON{
+		{FormatID: "dash-6", Ext: "mp4", Height: 1080, Protocol: "http_dash_segments", VCodec: "avc1", ACodec: "none", TBR: 3000},
+		{FormatID: "dash-audio", Ext: "m4a", Protocol: "http_dash_segments", VCodec: "none", ACodec: "mp4a", ABR: 128},
+	}
+
+	formatos := normalizarFormatos(brutos)
+
+	require.Len(t, formatos, 2)
+	require.Equal(t, media.KindVideo, formatos[0].Kind)
+	require.Equal(t, media.KindAudio, formatos[1].Kind)
+}
+
+// Na mesma altura, o arquivo único ganha do fragmentado: informa o tamanho
+// exato e dispensa a remuxagem.
+func TestNormalizarFormatosPrefereArquivoUnicoAoSegmentado(t *testing.T) {
+	brutos := []formatoJSON{
+		{FormatID: "hls-720", Ext: "mp4", Height: 720, Protocol: "m3u8_native", VCodec: "avc1", ACodec: "mp4a", TBR: 5000},
+		{FormatID: "http-720", Ext: "mp4", Height: 720, Protocol: "https", VCodec: "avc1", ACodec: "mp4a", TBR: 2000, Filesize: 1000},
+	}
+
+	formatos := normalizarFormatos(brutos)
+
+	require.Len(t, formatos, 1)
+	require.Equal(t, "http-720", formatos[0].ID,
+		"o progressivo vence mesmo com taxa de bits menor")
+	require.Equal(t, int64(1000), formatos[0].SizeBytes)
+}
+
+// Storyboards não são mídia e não podem virar opção de qualidade.
+func TestNormalizarFormatosIgnoraStoryboards(t *testing.T) {
+	brutos := []formatoJSON{
+		{FormatID: "sb0", Ext: "mhtml", Height: 90, Protocol: "mhtml", VCodec: "none", ACodec: "none"},
+		{FormatID: "hls-720", Ext: "mp4", Height: 720, Protocol: "m3u8_native", VCodec: "avc1", ACodec: "mp4a"},
+	}
+
+	formatos := normalizarFormatos(brutos)
+
+	require.Len(t, formatos, 1)
+	require.Equal(t, "hls-720", formatos[0].ID)
+}
+
+// O seletor precisa degradar em vez de desistir: os ids do yt-dlp não são
+// estáveis entre duas extrações, e o id que a tela ofereceu pode não existir
+// mais quando o worker vai baixar.
+func TestSeletorVideoDegradaPorAltura(t *testing.T) {
+	seletor := seletorVideo("hls-fastly_skyfire-3609", 720)
+	alternativas := strings.Split(seletor, "/")
+
+	require.Equal(t, "hls-fastly_skyfire-3609+bestaudio", alternativas[0],
+		"o formato pedido vem primeiro, somado ao áudio")
+	require.Equal(t, "hls-fastly_skyfire-3609", alternativas[1],
+		"depois ele sozinho, para quando já traz áudio")
+	require.Contains(t, seletor, "bestvideo[height<=720]+bestaudio",
+		"se o id sumiu, a mesma resolução por outro caminho")
+	require.Equal(t, "best", alternativas[len(alternativas)-1],
+		"a última alternativa nunca deixa voltar de mãos vazias")
+}
+
+func TestSeletorVideoSemAlturaConhecida(t *testing.T) {
+	seletor := seletorVideo("137", 0)
+
+	require.Contains(t, seletor, "137+bestaudio")
+	require.NotContains(t, seletor, "height<=",
+		"sem altura não há como limitar; inventar um número daria a resolução errada")
+	require.Contains(t, seletor, "best")
+}
+
+func TestSeletorVideoSemFormatoEscolhido(t *testing.T) {
+	seletor := seletorVideo("", 0)
+
+	require.Equal(t, "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/bestvideo+bestaudio/best", seletor)
+}
+
+func TestSeletorAudioDegrada(t *testing.T) {
+	require.Equal(t, "140/bestaudio/best", seletorAudio("140"))
+	require.Equal(t, "bestaudio/best", seletorAudio(""))
 }

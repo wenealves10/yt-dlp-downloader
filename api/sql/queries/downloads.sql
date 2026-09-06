@@ -64,10 +64,10 @@ WHERE id = $1;
 INSERT INTO downloads (
   id, user_id, original_url, title, format, status,
   thumbnail_url, duration_seconds, platform, provider,
-  format_id, quality_label, uploader, total_bytes
+  format_id, quality_label, uploader, total_bytes, format_height
 )
 VALUES (
-  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
+  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
 )
 RETURNING *;
 

@@ -183,6 +183,7 @@ func (p *JobDownloadMedia) baixar(ctx context.Context, download db.Download) (*m
 	resultado, err := provider.Download(ctx, media.Request{
 		URL:        download.OriginalUrl,
 		FormatID:   download.FormatID.String,
+		MaxHeight:  int(download.FormatHeight),
 		Kind:       kind,
 		OutputDir:  dir,
 		Filename:   "media_" + download.ID.String(),

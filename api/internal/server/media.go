@@ -238,6 +238,10 @@ func (s *Server) criarDownloadMedia(ctx *gin.Context, req criarDownloadMediaRequ
 		QualityLabel:    pgtype.Text{String: escolhido.Label, Valid: escolhido.Label != ""},
 		Uploader:        pgtype.Text{String: metadata.Uploader, Valid: metadata.Uploader != ""},
 		TotalBytes:      tamanhoEstimado(metadata.Formats, escolhido, kind),
+		// A altura sobrevive ao id: os ids do yt-dlp não são estáveis entre
+		// duas extrações, e é ela que permite ao worker cair na resolução mais
+		// próxima em vez de falhar.
+		FormatHeight: int32(escolhido.Height),
 	})
 	if err != nil {
 		log.Printf("media: falha ao criar download: %v", err)

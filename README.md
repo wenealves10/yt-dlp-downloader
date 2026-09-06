@@ -185,6 +185,35 @@ O registry tenta na ordem, e o yt-dlp fica por último como fallback geral. O
 fallback só dispara para falhas de **disponibilidade**: vídeo privado, ao vivo ou
 removido não reentra, porque o próximo provider chegaria à mesma conclusão.
 
+### Formatos
+
+`normalizarFormatos` fica com a melhor opção por altura de vídeo, mais a melhor
+faixa de áudio — o yt-dlp devolve trinta ou mais variações do mesmo formato, e
+oferecer todas só atrapalharia quem escolhe.
+
+**Formatos segmentados (HLS/DASH) contam.** Essa função já os descartava, com a
+justificativa de que "não geram um arquivo final utilizável" — o que é falso: o
+yt-dlp baixa os fragmentos e remuxa em MP4 normal. O efeito era grave e
+silencioso: Vimeo, Dailymotion, Pinterest, Reddit e X servem **só** HLS, então a
+lista de formatos vinha vazia, o download caía num seletor genérico e terminava
+em "o formato escolhido não está disponível" — um erro sobre a escolha do
+usuário para uma causa que não tinha nada a ver com ela. Entre dois formatos da
+mesma altura o arquivo único ainda ganha do fragmentado, por informar o tamanho
+exato e dispensar a remuxagem.
+
+**Os ids do yt-dlp não são estáveis** entre duas extrações do mesmo conteúdo: em
+HLS eles carregam o CDN sorteado na hora. Por isso o download guarda também a
+altura pretendida (`format_height`) e o `-f` é uma cadeia que degrada em vez de
+desistir:
+
+```
+<id>+bestaudio / <id> / bestvideo[height<=H]+bestaudio / best[height<=H] / ... / best
+```
+
+O yt-dlp para na primeira alternativa que casar. Se o id sumiu, cai na mesma
+resolução por outro caminho; na pior das hipóteses entrega o melhor disponível,
+em vez de falhar.
+
 ### Segurança da URL
 
 `media.NormalizeURL` é a fronteira entre entrada não confiável e o resto do
@@ -317,6 +346,7 @@ Reconhecer a URL e conseguir baixar são coisas diferentes:
 | Situação | Exemplos | O que acontece |
 | --- | --- | --- |
 | Funciona anônimo | YouTube, TikTok, LinkedIn, Twitch | Baixa direto |
+| Só HLS/DASH | Vimeo, Dailymotion, Pinterest, Reddit, X | Baixa direto — o yt-dlp busca os fragmentos e remuxa em MP4 |
 | Precisa de impersonação | Dailymotion, Vimeo | O extra `curl-cffi` do yt-dlp entrega o TLS fingerprint de navegador que essas plataformas exigem. Sem ele: `none of these impersonate targets are available` |
 | Precisa de conta | Vimeo (sempre), Pinterest / Reddit / X (do IP do datacenter) | Cadastre a conta da plataforma no painel |
 | Sem extractor | Kwai | Recusado na hora, dizendo o nome da plataforma |

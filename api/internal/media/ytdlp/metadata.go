@@ -143,33 +143,64 @@ func (p *Provider) Metadata(ctx context.Context, parsed *url.URL, opts media.Met
 	}, nil
 }
 
+// segmentado informa se o formato é entregue em fragmentos (HLS, DASH) em vez
+// de um arquivo único.
+//
+// Isto NÃO desqualifica o formato: o yt-dlp baixa os fragmentos e os remuxa em
+// um MP4 normal. Serve só como critério de desempate — entre dois formatos da
+// mesma altura, o arquivo único é preferível porque informa o tamanho exato e
+// dispensa a remuxagem.
+func segmentado(f formatoJSON) bool {
+	switch f.Protocol {
+	case "m3u8", "m3u8_native", "http_dash_segments":
+		return true
+	}
+	return false
+}
+
+// melhorQue decide qual dos dois formatos da mesma altura fica na lista.
+func melhorQue(candidato, atual formatoJSON) bool {
+	// Arquivo único ganha do fragmentado: tamanho exato e sem remuxagem.
+	if segmentado(candidato) != segmentado(atual) {
+		return !segmentado(candidato)
+	}
+	if candidato.TBR != atual.TBR {
+		return candidato.TBR > atual.TBR
+	}
+	// Empatando, o que já traz áudio junto evita a etapa de merge.
+	return candidato.temAudio() && !atual.temAudio()
+}
+
 // normalizarFormatos traduz o vocabulário do yt-dlp para o do domínio e reduz a
 // lista ao que faz sentido oferecer.
 //
 // O yt-dlp devolve trinta ou mais formatos para um vídeo do YouTube, muitos
 // deles variações do mesmo que só confundiriam quem escolhe. Ficamos com a
 // melhor opção por altura de vídeo, mais as de áudio.
+//
+// Formatos segmentados (HLS/DASH) CONTAM. Descartá-los, como esta função fazia,
+// zerava a lista inteira em Vimeo, Dailymotion, Pinterest, Reddit e X — todos
+// servem só HLS. Sem formato nenhum, o download caía num seletor genérico e
+// terminava em "o formato escolhido não está disponível", que era o erro
+// visível para uma causa que não tinha nada a ver com a escolha do usuário.
 func normalizarFormatos(brutos []formatoJSON) []media.Format {
 	melhorPorAltura := map[int]formatoJSON{}
 	var melhorAudio *formatoJSON
 
 	for _, bruto := range brutos {
-		// Formatos de streaming não geram um arquivo final utilizável aqui.
-		if bruto.Protocol == "m3u8" || bruto.Protocol == "m3u8_native" {
+		if bruto.FormatID == "" {
 			continue
 		}
-		if bruto.FormatID == "" {
+		// Storyboards vêm como mhtml sem vídeo nem áudio; o switch abaixo já os
+		// deixa de fora, mas descartar aqui evita percorrê-los.
+		if bruto.Protocol == "mhtml" {
 			continue
 		}
 
 		switch {
 		case bruto.temVideo() && bruto.Height > 0:
 			atual, existe := melhorPorAltura[bruto.Height]
-			// Entre dois formatos da mesma altura, vence o de maior taxa de
-			// bits; empatando, o que já traz áudio junto (evita a etapa de
-			// merge).
-			if !existe || bruto.TBR > atual.TBR ||
-				(bruto.TBR == atual.TBR && bruto.temAudio() && !atual.temAudio()) {
+			if !existe || melhorQue(bruto, atual) {
 				melhorPorAltura[bruto.Height] = bruto
 			}
 		case !bruto.temVideo() && bruto.temAudio():

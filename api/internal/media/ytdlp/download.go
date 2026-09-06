@@ -135,26 +135,61 @@ func (p *Provider) argsArquivo(req media.Request, saidaAbs string) []string {
 	switch req.Kind {
 	case media.KindAudio:
 		args = append(args, "-x", "--audio-format", "mp3", "--audio-quality", "0")
-		if req.FormatID != "" {
-			args = append(args, "-f", req.FormatID)
-		} else {
-			args = append(args, "-f", "bestaudio/best")
-		}
+		args = append(args, "-f", seletorAudio(req.FormatID))
 	default:
-		if req.FormatID != "" {
-			// O formato escolhido pode ser só vídeo; somar a melhor faixa de
-			// áudio é o que produz um arquivo assistível. A alternativa depois
-			// da barra cobre o caso de o formato já trazer áudio.
-			args = append(args, "-f", req.FormatID+"+bestaudio/"+req.FormatID)
-		} else {
-			args = append(args, "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best")
-		}
+		args = append(args, "-f", seletorVideo(req.FormatID, req.MaxHeight))
 		args = append(args, "--merge-output-format", "mp4")
 	}
 
 	// O "--" encerra as opções: o que vier depois é tratado como URL, mesmo que
 	// comece com hífen.
 	return append(args, "--", req.URL)
+}
+
+// seletorVideo monta a cadeia de alternativas do `-f`.
+//
+// Ela existe porque os ids do yt-dlp NÃO são estáveis entre duas extrações do
+// mesmo conteúdo: em HLS eles carregam o CDN sorteado na hora, e o id que a
+// tela ofereceu pode não existir quando o worker vai baixar. Antes isso
+// terminava em "o formato escolhido não está disponível" — um erro sobre a
+// escolha do usuário para um problema que não era dele.
+//
+// A ordem vai do mais específico ao mais genérico, e o yt-dlp para na primeira
+// que casar:
+//
+//  1. o formato pedido somado à melhor faixa de áudio (o formato pode ser mudo);
+//  2. o formato pedido sozinho (quando ele já traz áudio);
+//  3. a mesma resolução por outro caminho, se o id sumiu;
+//  4. qualquer coisa, para não voltar de mãos vazias.
+func seletorVideo(formatoID string, alturaMax int) string {
+	var alternativas []string
+
+	if formatoID != "" {
+		alternativas = append(alternativas, formatoID+"+bestaudio", formatoID)
+	}
+
+	if alturaMax > 0 {
+		limite := strconv.Itoa(alturaMax)
+		alternativas = append(alternativas,
+			"bestvideo[height<="+limite+"]+bestaudio",
+			"best[height<="+limite+"]")
+	}
+
+	// Sem preferência nenhuma, o MP4 primeiro: é o que toca em qualquer lugar.
+	alternativas = append(alternativas,
+		"bestvideo[ext=mp4]+bestaudio[ext=m4a]", "best[ext=mp4]",
+		"bestvideo+bestaudio", "best")
+
+	return strings.Join(alternativas, "/")
+}
+
+// seletorAudio segue a mesma ideia: o id pedido pode ter deixado de existir, e
+// aí qualquer faixa de áudio é melhor do que falhar.
+func seletorAudio(formatoID string) string {
+	if formatoID == "" {
+		return "bestaudio/best"
+	}
+	return formatoID + "/bestaudio/best"
 }
 
 // interpretarProgresso lê a linha do progress-template. Campos ausentes chegam

@@ -80,7 +80,12 @@ type Request struct {
 	URL string
 	// FormatID vazio significa "use o padrão do Kind".
 	FormatID string
-	Kind     Kind
+	// MaxHeight é a resolução pretendida, guardada à parte porque os ids do
+	// yt-dlp não são estáveis entre duas extrações do mesmo conteúdo. Quando o
+	// id escolhido não existe mais, ela permite cair na resolução mais próxima
+	// em vez de falhar. Zero significa "não sei".
+	MaxHeight int
+	Kind      Kind
 	// OutputDir é criado e limpo por quem chama; o provider só escreve dentro.
 	OutputDir string
 	// Filename é o nome base, sem extensão. O provider decide a extensão final.
