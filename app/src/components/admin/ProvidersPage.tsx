@@ -11,12 +11,32 @@ import {
 import { AdminShell } from "./AdminShell";
 import { useAuth } from "../../hooks/useAuth";
 
+type Uso = "required" | "optional" | "unused";
+
 interface Ferramenta {
   name: string;
   available: boolean;
   version?: string;
   required: boolean;
+  usage?: Uso;
+  note?: string;
 }
+
+/**
+ * "Opcional" e "não usada nesta etapa" são coisas diferentes, e o painel já
+ * confundiu as duas: o deno aparecia como não usado quando na verdade é
+ * executado nas duas etapas. Um worker de versão anterior publica relatório sem
+ * `usage`, então cai no booleano antigo.
+ */
+function usoDe(ferramenta: Ferramenta): Uso {
+  return ferramenta.usage ?? (ferramenta.required ? "required" : "optional");
+}
+
+const ROTULO_USO: Record<Uso, string> = {
+  required: "obrigatória",
+  optional: "opcional",
+  unused: "não usada nesta etapa",
+};
 
 interface ProviderSaude {
   provider: string;
@@ -80,34 +100,50 @@ const TabelaFerramentas: React.FC<{ ferramentas: Ferramenta[] }> = ({
         </tr>
       </thead>
       <tbody className="divide-y divide-gray-700">
-        {ferramentas.map((ferramenta) => (
-          <tr key={ferramenta.name}>
-            <td className="py-2.5 pr-4 text-gray-200">
-              {ferramenta.name}
-              {!ferramenta.required && (
-                <span className="ml-2 text-xs text-gray-400">
-                  não usada nesta etapa
-                </span>
-              )}
-            </td>
-            <td className="py-2.5 pr-4">
-              {ferramenta.available ? (
-                <span className="text-green-400">disponível</span>
-              ) : (
-                <span
-                  className={
-                    ferramenta.required ? "text-red-400" : "text-gray-400"
-                  }
-                >
-                  ausente
-                </span>
-              )}
-            </td>
-            <td className="py-2.5 text-gray-400 font-mono text-xs">
-              {ferramenta.version || "—"}
-            </td>
-          </tr>
-        ))}
+        {ferramentas.map((ferramenta) => {
+          const uso = usoDe(ferramenta);
+          return (
+            <tr key={ferramenta.name} className="align-top">
+              <td className="py-2.5 pr-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-gray-200">{ferramenta.name}</span>
+                  <span
+                    className={`text-xs ${
+                      uso === "unused" ? "text-gray-400" : "text-gray-300"
+                    }`}
+                  >
+                    {ROTULO_USO[uso]}
+                  </span>
+                </div>
+                {ferramenta.note && (
+                  <p className="mt-0.5 max-w-md text-xs text-gray-400">
+                    {ferramenta.note}
+                  </p>
+                )}
+              </td>
+              <td className="py-2.5 pr-4 whitespace-nowrap">
+                {ferramenta.available ? (
+                  <span
+                    className={
+                      uso === "unused" ? "text-gray-300" : "text-green-400"
+                    }
+                  >
+                    disponível
+                  </span>
+                ) : uso === "required" ? (
+                  <span className="text-red-400">ausente</span>
+                ) : uso === "optional" ? (
+                  <span className="text-amber-400">ausente</span>
+                ) : (
+                  <span className="text-gray-400">ausente</span>
+                )}
+              </td>
+              <td className="py-2.5 text-gray-400 font-mono text-xs break-all">
+                {ferramenta.version || "—"}
+              </td>
+            </tr>
+          );
+        })}
       </tbody>
     </table>
   </div>

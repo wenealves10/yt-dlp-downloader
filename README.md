@@ -235,10 +235,17 @@ runtime JavaScript, e quais estão ausentes.
 A tela separa **duas etapas**, porque elas rodam em processos e imagens
 diferentes:
 
-| Etapa | Processo | Precisa de ffmpeg? |
-| --- | --- | --- |
-| Resolução de metadados | API (`Dockerfile.server`) | Não — só executa `--dump-single-json` |
-| Download | Worker (`Dockerfile.worker`) | Sim — junta faixas separadas e converte para MP3 |
+| Etapa | Processo | ffmpeg | deno |
+| --- | --- | --- | --- |
+| Resolução de metadados | API (`Dockerfile.server`) | não usado — só executa `--dump-single-json` | usado, opcional |
+| Download | Worker (`Dockerfile.worker`) | **obrigatório** — junta faixas separadas e converte para MP3 | usado, opcional |
+
+Cada dependência é classificada em três estados, não dois: **obrigatória**
+(sem ela a etapa não roda), **opcional** (a etapa a executa, e a ausência
+degrada o resultado) e **não usada nesta etapa** (pertence à outra). Um booleano
+só confundia os dois últimos, e o painel chegou a dizer que o `deno` não era
+usado na resolução — ele é: sem o runtime JavaScript, requisições com cookies de
+conta autenticada falham nas duas etapas.
 
 O painel roda na API, então executar o diagnóstico ali não diria nada sobre o
 worker. Em vez disso o worker publica seu relatório no Redis

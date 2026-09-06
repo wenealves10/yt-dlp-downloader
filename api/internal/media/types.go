@@ -165,6 +165,22 @@ func HealthKey(role Role) string {
 // precisa aparecer como silencioso, e não como saudável para sempre.
 const HealthTTL = 10 * time.Minute
 
+// ToolUsage diz o que esta etapa faz com a dependência. São três estados
+// distintos, e um booleano só os confundia: "opcional" e "nem é executada aqui"
+// apareciam iguais na tela, fazendo parecer que o runtime JavaScript não servia
+// para nada quando na verdade ele é usado nas duas etapas.
+type ToolUsage string
+
+const (
+	// UsageRequired: sem ela esta etapa não funciona.
+	UsageRequired ToolUsage = "required"
+	// UsageOptional: esta etapa a executa, e a ausência degrada o resultado sem
+	// derrubar o provider.
+	UsageOptional ToolUsage = "optional"
+	// UsageUnused: esta etapa nunca a executa — a dependência pertence à outra.
+	UsageUnused ToolUsage = "unused"
+)
+
 // Tool é uma dependência externa do provider (o próprio binário, ffmpeg, o
 // runtime JavaScript).
 type Tool struct {
@@ -172,8 +188,13 @@ type Tool struct {
 	Available bool   `json:"available"`
 	Version   string `json:"version,omitempty"`
 	// Required distingue o que impede o provider de funcionar do que apenas
-	// reduz a qualidade do resultado.
-	Required bool `json:"required"`
+	// reduz a qualidade do resultado. Mantido junto de Usage porque um worker
+	// de versão anterior ainda publica relatórios só com este campo.
+	Required bool      `json:"required"`
+	Usage    ToolUsage `json:"usage,omitempty"`
+	// Note explica, para quem lê o painel, o que a ausência custa. Sem isso a
+	// tela mostra um estado sem dizer qual é a consequência dele.
+	Note string `json:"note,omitempty"`
 }
 
 // Erros de domínio. Os providers traduzem a saída bruta para um destes, e é

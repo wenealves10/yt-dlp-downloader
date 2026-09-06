@@ -127,17 +127,32 @@ func (p *Provider) Health(ctx context.Context) media.Health {
 		saude.Version = versao
 	}
 
-	saude.Tools = []media.Tool{
-		{Name: "yt-dlp", Available: saude.Available, Version: saude.Version, Required: true},
-	}
+	saude.Tools = []media.Tool{{
+		Name:      "yt-dlp",
+		Available: saude.Available,
+		Version:   saude.Version,
+		Required:  true,
+		Usage:     media.UsageRequired,
+		Note:      "é o mecanismo em si: fala com a plataforma e lê os formatos",
+	}}
 
 	// ffmpeg junta vídeo e áudio separados e converte para MP3 — no processo
 	// que BAIXA. Quem só resolve metadados nunca o executa, e exigi-lo ali
 	// pintaria de vermelho um processo perfeitamente saudável.
 	precisaFFmpeg := p.cfg.Role == media.RoleDownloader
 	versaoFFmpeg, erroFFmpeg := versaoDe(ctx, p.cfg.FFmpegBinary, "-version")
+	usoFFmpeg, notaFFmpeg := media.UsageUnused, "esta etapa só lê metadados; nada de mídia é aberto ou convertido aqui"
+	if precisaFFmpeg {
+		usoFFmpeg = media.UsageRequired
+		notaFFmpeg = "junta as faixas separadas de vídeo e áudio (acima de 720p) e converte para MP3"
+	}
 	saude.Tools = append(saude.Tools, media.Tool{
-		Name: "ffmpeg", Available: erroFFmpeg == nil, Version: versaoFFmpeg, Required: precisaFFmpeg,
+		Name:      "ffmpeg",
+		Available: erroFFmpeg == nil,
+		Version:   versaoFFmpeg,
+		Required:  precisaFFmpeg,
+		Usage:     usoFFmpeg,
+		Note:      notaFFmpeg,
 	})
 	if erroFFmpeg != nil && precisaFFmpeg {
 		saude.Available = false
@@ -146,12 +161,20 @@ func (p *Provider) Health(ctx context.Context) media.Health {
 		}
 	}
 
-	// O runtime JavaScript resolve o desafio "n" do YouTube. Sem ele, uma
-	// requisição autenticada é recusada — mas o resto das plataformas continua
-	// funcionando, então não derruba o provider.
+	// O runtime JavaScript resolve o desafio "n" do YouTube, e é executado nas
+	// DUAS etapas: quem só lê metadados também precisa dele para uma requisição
+	// autenticada passar. Opcional, porém, não é o mesmo que não usado — o
+	// painel já confundiu os dois: sem deno o YouTube perde formatos e as
+	// requisições com cookies falham, enquanto o resto das plataformas segue
+	// funcionando.
 	versaoDeno, erroDeno := versaoDe(ctx, "deno", "--version")
 	saude.Tools = append(saude.Tools, media.Tool{
-		Name: "deno", Available: erroDeno == nil, Version: versaoDeno, Required: false,
+		Name:      "deno",
+		Available: erroDeno == nil,
+		Version:   versaoDeno,
+		Required:  false,
+		Usage:     media.UsageOptional,
+		Note:      "resolve o desafio \"n\" do YouTube; sem ele, requisições com conta autenticada falham",
 	})
 
 	return saude

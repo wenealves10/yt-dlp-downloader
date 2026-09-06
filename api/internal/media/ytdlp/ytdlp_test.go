@@ -193,8 +193,38 @@ func TestHealthResolverIgnoraFFmpegAusente(t *testing.T) {
 	if ffmpeg.Required {
 		t.Error("ffmpeg não deveria ser obrigatório para o resolver")
 	}
+	if ffmpeg.Usage != media.UsageUnused {
+		t.Errorf("o resolver nem executa ffmpeg: uso esperado %q, obtido %q", media.UsageUnused, ffmpeg.Usage)
+	}
 	if ffmpeg.Available {
 		t.Error("ffmpeg inexistente não deveria ser reportado como disponível")
+	}
+}
+
+// O deno é executado nas DUAS etapas — quem só lê metadados também precisa dele
+// para uma requisição autenticada passar. Marcá-lo como não usado foi o que fez
+// o painel dizer que ele não servia para nada ali.
+func TestHealthDenoEhOpcionalNosDoisPapeis(t *testing.T) {
+	for _, papel := range []media.Role{media.RoleResolver, media.RoleDownloader} {
+		provider := New(Config{
+			Binary:       binarioFalso(t, "yt-dlp", "2025.09.01"),
+			FFmpegBinary: binarioFalso(t, "ffmpeg", "ffmpeg version 5.1.9"),
+			Role:         papel,
+		})
+
+		deno, ok := ferramenta(provider.Health(context.Background()).Tools, "deno")
+		if !ok {
+			t.Fatalf("[%s] deno deveria aparecer na lista", papel)
+		}
+		if deno.Usage != media.UsageOptional {
+			t.Errorf("[%s] uso esperado %q, obtido %q", papel, media.UsageOptional, deno.Usage)
+		}
+		if deno.Required {
+			t.Errorf("[%s] a ausência do deno degrada, mas não derruba o provider", papel)
+		}
+		if deno.Note == "" {
+			t.Errorf("[%s] o painel precisa dizer o que a ausência custa", papel)
+		}
 	}
 }
 
@@ -222,6 +252,9 @@ func TestHealthDownloaderExigeFFmpeg(t *testing.T) {
 	}
 	if !ffmpeg.Required {
 		t.Error("ffmpeg deveria ser obrigatório para o downloader")
+	}
+	if ffmpeg.Usage != media.UsageRequired {
+		t.Errorf("uso esperado %q, obtido %q", media.UsageRequired, ffmpeg.Usage)
 	}
 }
 
