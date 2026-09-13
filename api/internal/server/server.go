@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-contrib/cors"
@@ -15,6 +16,7 @@ import (
 	"github.com/wenealves10/yt-dlp-downloader/internal/browser"
 	"github.com/wenealves10/yt-dlp-downloader/internal/configs"
 	"github.com/wenealves10/yt-dlp-downloader/internal/db"
+	"github.com/wenealves10/yt-dlp-downloader/internal/integrations"
 	"github.com/wenealves10/yt-dlp-downloader/internal/libs/storage"
 	"github.com/wenealves10/yt-dlp-downloader/internal/libs/stream"
 	"github.com/wenealves10/yt-dlp-downloader/internal/media"
@@ -38,7 +40,15 @@ type Server struct {
 	// permite o cancelamento aparecer na tela na hora, sem esperar o worker
 	// notar o pedido.
 	rdStream stream.EventPublisher
-	router   *gin.Engine
+
+	// Peças da seção de integrações. Nenhuma delas é obrigatória para o resto
+	// da API funcionar: sem Redis o limitador falha aberto, e sem elas as rotas
+	// de integração simplesmente não são exercitadas.
+	limiter    *integrations.Limiter
+	auditor    *auditor
+	dispatcher *integrations.Dispatcher
+
+	router *gin.Engine
 }
 
 func NewServer(
@@ -74,6 +84,18 @@ func NewServer(
 	if redisClient != nil {
 		server.rdStream = stream.NewRedisPublisher(redisClient)
 	}
+
+	// A seção de integrações é montada aqui, e não em main.go, porque tudo de
+	// que ela precisa (store, fila, Redis, config) o servidor já tem. Pedir
+	// esses componentes de novo na assinatura de NewServer só criaria uma
+	// segunda chance de passar um deles diferente.
+	server.limiter = integrations.NewLimiter(redisClient)
+	server.auditor = novoAuditor(store)
+	server.dispatcher = integrations.NewDispatcher(store, queueClient, server.limiter,
+		integrations.DispatcherConfig{
+			BaseURL:            strings.TrimRight(config.PublicAPIURL, "/"),
+			IntervaloProgresso: config.WebhookProgressInterval,
+		})
 
 	if v, ok := binding.Validator.Engine().(*validator.Validate); ok {
 		v.RegisterValidation("valid_url", ValidYouTubeURL)
@@ -192,13 +214,125 @@ func (server *Server) setupRouter() {
 	// reconferido no handler.
 	groupV1.GET("/admin/youtube/accounts/:id/browser/ws", server.youtubeBrowserWS)
 
+	// ---------------------------------------------------------------------
+	// Integrações — painel do super admin
+	// ---------------------------------------------------------------------
+	//
+	// Criar integração, emitir e revogar chave, cadastrar webhook e ler a
+	// auditoria é SEMPRE operação de pessoa autenticada no painel. Não existe
+	// auto-cadastro: um sistema que pudesse criar o próprio acesso tornaria a
+	// cota e a lista de IPs decorativas.
+	adminRoutes.GET("/integrations", server.listIntegrations)
+	adminRoutes.POST("/integrations", server.createIntegration)
+	adminRoutes.GET("/integrations/:id", server.getIntegration)
+	adminRoutes.PATCH("/integrations/:id", server.updateIntegration)
+	adminRoutes.DELETE("/integrations/:id", server.deleteIntegration)
+
+	adminRoutes.GET("/integrations/:id/keys", server.listIntegrationKeys)
+	adminRoutes.POST("/integrations/:id/keys", server.createIntegrationKey)
+	adminRoutes.DELETE("/integrations/:id/keys/:keyId", server.revokeIntegrationKey)
+
+	adminRoutes.GET("/integrations/:id/webhooks", server.listAdminWebhooks)
+	adminRoutes.POST("/integrations/:id/webhooks", server.createAdminWebhook)
+	adminRoutes.PATCH("/integrations/:id/webhooks/:webhookId", server.updateAdminWebhook)
+	adminRoutes.DELETE("/integrations/:id/webhooks/:webhookId", server.deleteAdminWebhook)
+	adminRoutes.POST("/integrations/:id/webhooks/:webhookId/test", server.testAdminWebhook)
+
+	adminRoutes.GET("/integrations/:id/deliveries", server.listAdminDeliveries)
+	adminRoutes.POST("/integrations/:id/deliveries/:deliveryId/retry", server.retryDelivery)
+	adminRoutes.GET("/integrations/:id/requests", server.listIntegrationRequests)
+	adminRoutes.GET("/integrations/:id/traffic", server.integrationTraffic)
+	adminRoutes.GET("/integrations/:id/downloads", server.listIntegrationDownloadsAdmin)
+
+	// ---------------------------------------------------------------------
+	// Integrações — a API que os outros sistemas consomem
+	// ---------------------------------------------------------------------
+	//
+	// A ordem dos middlewares é a do raciocínio, e importa:
+	//
+	//  1. recuperação própria, para que um pânico responda JSON com `code` em
+	//     vez do corpo vazio do Recovery global;
+	//  2. auditoria, que é a MAIS EXTERNA das duas restantes justamente para
+	//     enxergar também o que a autenticação recusou — as tentativas
+	//     recusadas são as que interessam numa investigação;
+	//  3. autenticação por chave de API, que aplica IP autorizado e limite de
+	//     chamadas.
+	//
+	// As rotas de download são os MESMOS handlers da tela. A conta de serviço
+	// entra no contexto pela mesma chave que o login usa, e é isso que permite
+	// reaproveitá-los sem duplicar a lógica de formato, sessão e cancelamento.
+	integrationRoutes := groupV1.Group("/integration",
+		integrationRecovery(),
+		server.integrationAuditMiddleware(),
+		server.integrationAuthMiddleware(),
+	)
+
+	integrationRoutes.GET("/me", server.integrationMe)
+	integrationRoutes.GET("/quota", server.integrationQuota)
+
+	// Resolver metadados não cria download e não consome cota: é a consulta que
+	// antecede a escolha da qualidade, igual à da tela.
+	integrationRoutes.POST("/media/resolve", server.resolveMedia)
+
+	// Só a criação passa pelo controle de cota e de simultâneos. Aplicá-lo na
+	// consulta faria um cliente sem cota perder também a capacidade de saber o
+	// que já pediu — e aí ele repetiria os pedidos, que é o oposto do objetivo.
+	integrationRoutes.POST("/downloads",
+		server.integrationQuotaMiddleware(), server.integrationCreateDownload)
+
+	integrationRoutes.GET("/downloads", server.integrationListDownloads)
+	integrationRoutes.GET("/downloads/:id", server.integrationGetDownload)
+	integrationRoutes.POST("/downloads/:id/cancel", server.integrationCancelDownload)
+	integrationRoutes.DELETE("/downloads/:id", server.deleteDownload)
+	integrationRoutes.GET("/downloads/:id/download-url", server.downloadURL)
+	integrationRoutes.GET("/downloads/:id/file", server.downloadFile)
+
+	integrationRoutes.GET("/webhooks", server.integrationListWebhooks)
+	integrationRoutes.POST("/webhooks/:webhookId/test", server.integrationTestWebhook)
+	integrationRoutes.GET("/deliveries", server.integrationListDeliveries)
+
+	// Rota inexistente sob /v1/integration responde no mesmo formato das
+	// outras. O 404 padrão do gin vem sem corpo, e seria a única resposta desta
+	// API que o cliente não conseguiria tratar programaticamente.
+	router.NoRoute(func(ctx *gin.Context) {
+		if strings.HasPrefix(ctx.Request.URL.Path, "/v1/integration") {
+			erroNaoEncontrado(ctx)
+			return
+		}
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "rota não encontrada"})
+	})
+
+	// Documentação da API, servida pelo próprio serviço: uma especificação em
+	// arquivo solto no repositório envelhece sem ninguém notar, e esta é a
+	// mesma que o código publica.
+	if server.config.DocsEnabled {
+		server.registrarDocumentacao(router)
+	}
+
 	server.router = router
 }
 
 func (s *Server) Start(address string) error {
 	// Bootstrap do primeiro super admin, quando configurado.
-	ensureSuperAdmin(context.Background(), s.store, s.config.SuperAdminEmail)
+	ctx := context.Background()
+	ensureSuperAdmin(ctx, s.store, s.config.SuperAdminEmail)
+
+	// Os dois trabalham fora do caminho da requisição: o auditor grava o log de
+	// acesso das integrações, e o despachante transforma evento de download em
+	// entrega de webhook.
+	s.auditor.iniciar(ctx)
+	s.dispatcher.Start(ctx)
+
 	return s.router.Run(address)
+}
+
+// Dispatcher expõe o despachante para quem consome o stream de eventos.
+//
+// O consumidor vive em main.go (é ele que também alimenta o SSE), e é de lá que
+// cada evento é entregue aqui. Um segundo consumidor só para webhooks criaria um
+// grupo de consumo concorrente, e metade dos eventos deixaria de chegar à tela.
+func (s *Server) Dispatcher() *integrations.Dispatcher {
+	return s.dispatcher
 }
 
 func errorResponse(err error) gin.H {

@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -72,10 +73,83 @@ type Provider interface {
 type Manager struct {
 	store  db.Store
 	client *browser.Client
+
+	mu    sync.Mutex
+	cache map[uuid.UUID]jarEmCache
 }
 
 func NewManager(store db.Store, client *browser.Client) *Manager {
-	return &Manager{store: store, client: client}
+	return &Manager{store: store, client: client, cache: map[uuid.UUID]jarEmCache{}}
+}
+
+// validadeDoJar é por quanto tempo o jar exportado de uma conta é
+// reaproveitado sem perguntar de novo ao serviço de navegador.
+//
+// Exportar cookies não é uma leitura barata: com o navegador da conta fechado,
+// o serviço sobe um Chrome headless sobre o perfil só para ler o jar e o
+// encerra em seguida. Isso acontecia a cada link colado, e é o que fazia a
+// resolução com sessão parecer cara demais para valer a pena.
+//
+// A janela é curta de propósito. Ela cobre a sequência que uma pessoa faz de
+// uma vez — colar o link, escolher a qualidade, confirmar —, e é curta o
+// bastante para que um novo login no painel passe a valer quase de imediato.
+const validadeDoJar = 2 * time.Minute
+
+type jarEmCache struct {
+	dados     []byte
+	validoAte time.Time
+}
+
+// jarDaConta devolve o jar da conta, do cache quando ele ainda vale.
+func (m *Manager) jarDaConta(ctx context.Context, account db.YoutubeAccount) ([]byte, error) {
+	if jar, ok := m.jarEmCache(account.ID); ok {
+		return jar, nil
+	}
+
+	jar, err := m.client.Cookies(ctx, account.ID, account.Platform)
+	if err != nil {
+		return nil, err
+	}
+
+	m.guardarJar(account.ID, jar)
+	return jar, nil
+}
+
+func (m *Manager) jarEmCache(accountID uuid.UUID) ([]byte, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	entrada, existe := m.cache[accountID]
+	if !existe || time.Now().After(entrada.validoAte) {
+		return nil, false
+	}
+	return entrada.dados, true
+}
+
+func (m *Manager) guardarJar(accountID uuid.UUID, jar []byte) {
+	agora := time.Now()
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// O mapa é pequeno (uma entrada por conta cadastrada); varrer o que venceu
+	// aqui evita guardar segredo de uma conta removida até o processo reiniciar.
+	for id, entrada := range m.cache {
+		if agora.After(entrada.validoAte) {
+			delete(m.cache, id)
+		}
+	}
+
+	m.cache[accountID] = jarEmCache{dados: jar, validoAte: agora.Add(validadeDoJar)}
+}
+
+// esquecerJar descarta o jar guardado. Toda vez que a conta se mostra
+// inutilizável o cache precisa sair junto: reaproveitar um jar já recusado só
+// repetiria a mesma falha até a janela vencer.
+func (m *Manager) esquecerJar(accountID uuid.UUID) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.cache, accountID)
 }
 
 // maxAcquireAttempts limita quantas contas são tentadas em uma única
@@ -145,7 +219,7 @@ func (m *Manager) Acquire(ctx context.Context, plataforma string) (*Lease, error
 func (m *Manager) leaseFor(ctx context.Context, account db.YoutubeAccount) (*Lease, error) {
 	perfil := browser.PerfilDe(account.Platform)
 
-	jar, err := m.client.Cookies(ctx, account.ID, account.Platform)
+	jar, err := m.jarDaConta(ctx, account)
 	if err != nil {
 		m.markUnavailable(ctx, account, err)
 		return nil, err
@@ -193,6 +267,8 @@ func (m *Manager) ReportAuthFailure(ctx context.Context, lease *Lease, reason st
 	log.Printf("ytaccounts: sessão rejeitada pela plataforma account_id=%s label=%s plataforma=%s",
 		lease.AccountID, lease.Label, lease.Plataforma)
 
+	m.esquecerJar(lease.AccountID)
+
 	if _, err := m.store.UpdateYoutubeAccountStatus(ctx, db.UpdateYoutubeAccountStatusParams{
 		ID:        lease.AccountID,
 		Status:    db.CoreYoutubeAccountStatusREQUIRESAUTH,
@@ -210,6 +286,8 @@ func (m *Manager) markUnavailable(ctx context.Context, account db.YoutubeAccount
 
 	log.Printf("ytaccounts: conta indisponível account_id=%s label=%s status=%s erro=%v",
 		account.ID, account.Label, status, cause)
+
+	m.esquecerJar(account.ID)
 
 	if _, err := m.store.UpdateYoutubeAccountStatus(ctx, db.UpdateYoutubeAccountStatusParams{
 		ID:        account.ID,

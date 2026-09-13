@@ -2,6 +2,7 @@ package server
 
 import (
 	"database/sql"
+	"errors"
 	"log"
 	"mime"
 	"net/http"
@@ -11,9 +12,9 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5"
 	"github.com/wenealves10/yt-dlp-downloader/internal/db"
 	"github.com/wenealves10/yt-dlp-downloader/internal/media"
-	"github.com/wenealves10/yt-dlp-downloader/internal/tokens"
 	"github.com/wenealves10/yt-dlp-downloader/internal/utils"
 )
 
@@ -126,11 +127,8 @@ func (s *Server) createDownload(ctx *gin.Context) {
 }
 
 func (s *Server) getDownloads(ctx *gin.Context) {
-	authPayload := ctx.MustGet(authorizationPayloadKey).(*tokens.Payload)
-	userID, err := utils.ParseUUID(authPayload.UserID)
-	if err != nil {
-		log.Printf("Failed to parse user ID: %v", err)
-		ctx.JSON(400, gin.H{"error": "Invalid user ID"})
+	userID, autenticado := usuarioAtualID(ctx)
+	if !autenticado {
 		return
 	}
 
@@ -188,20 +186,12 @@ func (s *Server) getDownloads(ctx *gin.Context) {
 }
 
 func (s *Server) getDailyDownloads(ctx *gin.Context) {
-	authPayload := ctx.MustGet(authorizationPayloadKey).(*tokens.Payload)
-	userID, err := utils.ParseUUID(authPayload.UserID)
-	if err != nil {
-		log.Printf("Failed to parse user ID: %v", err)
-		ctx.JSON(400, gin.H{"error": "Invalid user ID"})
+	user, autenticado := usuarioAtual(ctx)
+	if !autenticado {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "requisição não autenticada"})
 		return
 	}
-
-	user, err := s.store.GetUserByID(ctx.Request.Context(), userID)
-	if err != nil {
-		log.Printf("Failed to get user: %v", err)
-		ctx.JSON(500, gin.H{"error": "Failed to get user"})
-		return
-	}
+	userID := user.ID
 
 	dailyDownloads, err := s.store.CountDownloadsToday(ctx, userID)
 	if err != nil {
@@ -233,46 +223,61 @@ func (s *Server) getDailyDownloads(ctx *gin.Context) {
 // and availability. It keeps all download delivery paths from ever accepting
 // an object key supplied by the browser.
 func (s *Server) authorizedCompletedDownload(ctx *gin.Context) (db.Download, bool) {
-	authPayload := ctx.MustGet(authorizationPayloadKey).(*tokens.Payload)
-	userID, err := utils.ParseUUID(authPayload.UserID)
-	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
+	userID, autenticado := usuarioAtualID(ctx)
+	if !autenticado {
 		return db.Download{}, false
 	}
 
 	downloadID, err := utils.ParseUUID(ctx.Param("id"))
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid download ID"})
+		erroDownload(ctx, http.StatusBadRequest, CodeInvalidRequest, "identificador de download inválido")
 		return db.Download{}, false
 	}
 
 	download, err := s.store.GetDownloadByID(ctx.Request.Context(), downloadID)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			ctx.JSON(http.StatusNotFound, gin.H{"error": "Download not found"})
+		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, sql.ErrNoRows) {
+			erroDownload(ctx, http.StatusNotFound, CodeNotFound, "download não encontrado")
 			return db.Download{}, false
 		}
 		log.Printf("Failed to get download %s: %v", downloadID, err)
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get download"})
+		erroDownload(ctx, http.StatusInternalServerError, CodeInternalError, "falha ao carregar o download")
 		return db.Download{}, false
 	}
 
+	// Download de outro dono responde 404, e não 403.
+	//
+	// Um 403 confirmaria que aquele identificador existe. Na tela isso é
+	// irrelevante — o usuário só vê os próprios —, mas esta mesma função atende
+	// a API de integrações, onde vários sistemas convivem: ali, a diferença
+	// entre "não existe" e "existe e não é seu" é um oráculo para enumerar os
+	// downloads dos outros.
 	if download.UserID != userID {
-		ctx.JSON(http.StatusForbidden, gin.H{"error": "You do not have permission to download this file"})
+		erroDownload(ctx, http.StatusNotFound, CodeNotFound, "download não encontrado")
 		return db.Download{}, false
 	}
 
 	if download.Status != db.CoreDownloadStatusCOMPLETED || !download.FileUrl.Valid || download.FileUrl.String == "" {
-		ctx.JSON(http.StatusConflict, gin.H{"error": "Download is not ready yet"})
+		erroDownload(ctx, http.StatusConflict, CodeDownloadNotReady, "o download ainda não está pronto")
 		return db.Download{}, false
 	}
 
 	if download.ExpiresAt.Valid && !download.ExpiresAt.Time.After(time.Now()) {
-		ctx.JSON(http.StatusGone, gin.H{"error": "Download has expired"})
+		erroDownload(ctx, http.StatusGone, CodeDownloadExpired, "o arquivo deste download expirou")
 		return db.Download{}, false
 	}
 
 	return download, true
+}
+
+// erroDownload responde um erro das rotas de download com mensagem E código.
+//
+// Estas rotas atendem as duas superfícies, e o código é obrigatório na de
+// integrações: é por ele que o sistema cliente decide entre tentar de novo mais
+// tarde (download_not_ready) e desistir de vez (download_expired).
+func erroDownload(ctx *gin.Context, status int, codigo, mensagem string) {
+	registrarCodigoErro(ctx, codigo)
+	ctx.JSON(status, gin.H{"error": mensagem, "code": codigo})
 }
 
 // downloadURL first authenticates the account in the API and only then creates
@@ -365,11 +370,8 @@ func downloadFilename(title, format string) string {
 }
 
 func (s *Server) deleteDownload(ctx *gin.Context) {
-	authPayload := ctx.MustGet(authorizationPayloadKey).(*tokens.Payload)
-	userID, err := utils.ParseUUID(authPayload.UserID)
-	if err != nil {
-		log.Printf("Failed to parse user ID: %v", err)
-		ctx.JSON(400, gin.H{"error": "Invalid user ID"})
+	userID, autenticado := usuarioAtualID(ctx)
+	if !autenticado {
 		return
 	}
 

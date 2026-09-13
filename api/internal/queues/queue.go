@@ -15,6 +15,11 @@ const (
 	TypeDownloadMediaQueue      = "download_media"
 	TypeTempCleanupQueue        = "temp_cleanup"
 	TypeMediaHealthQueue        = "media_health"
+	// A entrega de webhook tem fila própria para não disputar slot com
+	// download: um cliente com endpoint lento não pode atrasar o trabalho que
+	// de fato produz arquivo.
+	TypeIntegrationWebhookQueue = "integration_webhook"
+	TypeIntegrationPruneQueue   = "integration_prune"
 )
 
 const (
@@ -38,6 +43,10 @@ const (
 	QueueWeightDownloadMedia    = 60
 	QueueWeightTempCleanup      = 1
 	QueueWeightMediaHealth      = 1
+	// Peso alto: a notificação é curta e o cliente está esperando por ela. Um
+	// peso baixo faria o aviso de "concluído" ficar atrás de downloads na fila.
+	QueueWeightIntegrationWebhook = 50
+	QueueWeightIntegrationPrune   = 1
 )
 
 // MaxTentativasDownload limita quantas vezes um download é reenfileirado.

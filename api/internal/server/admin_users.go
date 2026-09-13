@@ -336,6 +336,14 @@ func (s *Server) updateUser(ctx *gin.Context) {
 		return
 	}
 
+	// Conta de serviço é gerenciada pela seção de integrações, e só por ela.
+	// Aqui ela nem aparece na listagem; editá-la por identificador direto
+	// permitiria, por exemplo, promovê-la a super admin — uma chave de API com
+	// acesso ao painel.
+	if ehContaDeServico(ctx, alvo) {
+		return
+	}
+
 	// Rebaixar ou bloquear o último super admin ativo tranca todo mundo para
 	// fora do painel, e não há tela para desfazer isso.
 	perdePoder := alvo.Role == db.CoreUserRoleSuperAdmin &&
@@ -402,12 +410,20 @@ func (s *Server) resetUserPassword(ctx *gin.Context) {
 		return
 	}
 
-	if _, err := s.store.GetUserByID(ctx.Request.Context(), userID); err != nil {
+	alvo, err := s.store.GetUserByID(ctx.Request.Context(), userID)
+	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			ctx.JSON(http.StatusNotFound, errorResponse(errors.New("usuário não encontrado")))
 			return
 		}
 		ctx.JSON(http.StatusInternalServerError, errorResponse(errors.New("falha ao carregar usuário")))
+		return
+	}
+
+	// Uma conta de integração não tem senha para redefinir: quem a autentica é
+	// a chave de API. Definir uma aqui criaria justamente o caminho de login
+	// que ela não deve ter.
+	if ehContaDeServico(ctx, alvo) {
 		return
 	}
 
@@ -470,6 +486,13 @@ func (s *Server) deleteUser(ctx *gin.Context) {
 		return
 	}
 
+	// Remover a conta pela tela de usuários deixaria a integração apontando
+	// para uma conta inexistente. A remoção correta é na seção de integrações,
+	// que revoga as chaves junto.
+	if ehContaDeServico(ctx, alvo) {
+		return
+	}
+
 	if alvo.Role == db.CoreUserRoleSuperAdmin {
 		if erro := s.garantirOutroSuperAdmin(ctx, alvo); erro != nil {
 			ctx.JSON(http.StatusConflict, errorResponse(erro))
@@ -497,4 +520,19 @@ func (s *Server) garantirOutroSuperAdmin(ctx *gin.Context, alvo db.User) error {
 		return errors.New("este é o único super admin ativo; promova outro antes de alterar este")
 	}
 	return nil
+}
+
+// ehContaDeServico recusa a operação quando o alvo é uma conta de integração, e
+// já responde por quem chama.
+//
+// Está em uma função porque a regra tem de valer nas TRÊS rotas de mutação
+// (atualizar, redefinir senha, remover): esquecer uma delas abriria exatamente
+// o caminho que a separação entre pessoa e sistema existe para fechar.
+func ehContaDeServico(ctx *gin.Context, alvo db.User) bool {
+	if alvo.Kind != db.CoreUserKindService {
+		return false
+	}
+	ctx.JSON(http.StatusConflict, errorResponse(errors.New(
+		"esta é a conta de uma integração; gerencie-a na seção de integrações")))
+	return true
 }

@@ -68,14 +68,15 @@ func TestPerfilDesconhecidoCaiNoPadrao(t *testing.T) {
 	}
 }
 
-// O YouTube não paga o custo de buscar cookies na resolução: ele resolve bem
-// anônimo, e subir um Chrome headless em todo link colado seria uma regressão.
-func TestYoutubeNaoExigeSessaoParaMetadados(t *testing.T) {
-	if PerfilDe("youtube").MetadadosExigemSessao {
-		t.Error("resolver YouTube não deveria exigir sessão")
-	}
-	if !PerfilDe("vimeo").MetadadosExigemSessao {
-		t.Error("o Vimeo recusa a leitura de metadados sem sessão")
+// De um IP de datacenter, NENHUMA plataforma gerenciada aqui entrega metadados
+// anônimo — o YouTube responde "Sign in to confirm you're not a bot" já na
+// primeira requisição. Resolver sem a sessão barra o usuário antes da escolha
+// de qualidade, num download que a conta emprestada concluiria sem problema.
+func TestMetadadosExigemSessaoEmTodasAsPlataformas(t *testing.T) {
+	for _, perfil := range PlataformasSuportadas() {
+		if !perfil.MetadadosExigemSessao {
+			t.Errorf("%s: resolver sem sessão é recusado de um IP de datacenter", perfil.Label)
+		}
 	}
 }
 

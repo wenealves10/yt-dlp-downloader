@@ -143,8 +143,8 @@ func TestDescricaoDaSessao(t *testing.T) {
 		esperado string
 	}{
 		{
-			"plataforma que não precisa de conta",
-			sessaoUsada{Plataforma: "youtube"},
+			"plataforma sem perfil de login",
+			sessaoUsada{Plataforma: "dailymotion"},
 			"esta plataforma resolve sem conta",
 		},
 		{

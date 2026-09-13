@@ -85,43 +85,177 @@ type Querier interface {
 	CountAuthenticatedYoutubeAccounts(ctx context.Context) (int64, error)
 	CountDownloadsByUser(ctx context.Context, userID uuid.UUID) (int64, error)
 	CountDownloadsToday(ctx context.Context, userID uuid.UUID) (int64, error)
+	// Trabalho em voo. A cota diária sozinha permitiria disparar tudo de uma vez e
+	// ocupar o worker inteiro; este número é o que sustenta o limite de simultâneos.
+	CountIntegrationActiveDownloads(ctx context.Context, userID uuid.UUID) (int64, error)
+	CountIntegrationDownloads(ctx context.Context, arg CountIntegrationDownloadsParams) (int64, error)
+	// Cota do dia. Mesmo corte de fuso do contador do usuário comum.
+	CountIntegrationDownloadsToday(ctx context.Context, userID uuid.UUID) (int64, error)
+	CountIntegrationRequests(ctx context.Context, arg CountIntegrationRequestsParams) (int64, error)
+	CountIntegrations(ctx context.Context, arg CountIntegrationsParams) (int64, error)
+	CountWebhookDeliveries(ctx context.Context, arg CountWebhookDeliveriesParams) (int64, error)
 	CountYoutubeAccounts(ctx context.Context) (int64, error)
 	CreateDownload(ctx context.Context, arg CreateDownloadParams) (Download, error)
+	// ---------------------------------------------------------------------------
+	// Integrações
+	// ---------------------------------------------------------------------------
+	CreateIntegration(ctx context.Context, arg CreateIntegrationParams) (Integration, error)
+	// ---------------------------------------------------------------------------
+	// Chaves de API
+	// ---------------------------------------------------------------------------
+	CreateIntegrationAPIKey(ctx context.Context, arg CreateIntegrationAPIKeyParams) (IntegrationApiKey, error)
+	// ---------------------------------------------------------------------------
+	// Auditoria de requisições
+	// ---------------------------------------------------------------------------
+	CreateIntegrationRequest(ctx context.Context, arg CreateIntegrationRequestParams) error
+	// ---------------------------------------------------------------------------
+	// Webhooks
+	// ---------------------------------------------------------------------------
+	CreateIntegrationWebhook(ctx context.Context, arg CreateIntegrationWebhookParams) (IntegrationWebhook, error)
 	CreateMediaDownload(ctx context.Context, arg CreateMediaDownloadParams) (Download, error)
+	// Consultas da seção de integrações: as contas de SISTEMA que consomem a
+	// plataforma por API, as chaves que as autenticam, os webhooks que avisam o
+	// sistema integrado e a auditoria de tudo que chegou por essa porta.
+	// ---------------------------------------------------------------------------
+	// Conta de serviço
+	// ---------------------------------------------------------------------------
+	// A conta de serviço nasce sem senha utilizável: `hashed_password` recebe um
+	// valor que nenhum bcrypt aceita como válido, então nem uma senha em branco
+	// autentica. Quem prova identidade aqui é a chave de API.
+	//
+	// `daily_limit` fica em zero porque a cota da integração vive na linha de
+	// `integrations`; deixar um número aqui criaria dois limites com o mesmo nome.
+	CreateServiceUser(ctx context.Context, arg CreateServiceUserParams) (User, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
+	// ---------------------------------------------------------------------------
+	// Entregas
+	// ---------------------------------------------------------------------------
+	CreateWebhookDelivery(ctx context.Context, arg CreateWebhookDeliveryParams) (IntegrationWebhookDelivery, error)
 	CreateYoutubeAccount(ctx context.Context, arg CreateYoutubeAccountParams) (YoutubeAccount, error)
 	DeleteDownload(ctx context.Context, id uuid.UUID) error
 	DeleteYoutubeAccount(ctx context.Context, id uuid.UUID) error
+	DisableIntegrationWebhook(ctx context.Context, arg DisableIntegrationWebhookParams) error
 	GetDownloadByID(ctx context.Context, id uuid.UUID) (Download, error)
 	GetDownloadsByUser(ctx context.Context, arg GetDownloadsByUserParams) ([]Download, error)
 	GetDownloadsExpired(ctx context.Context) ([]Download, error)
+	GetIntegrationAPIKey(ctx context.Context, id uuid.UUID) (IntegrationApiKey, error)
+	GetIntegrationByID(ctx context.Context, id uuid.UUID) (Integration, error)
+	// Usada pelo despachante de webhooks: o evento de download carrega o
+	// `user_id`, e é por ele que se descobre se aquele download pertence a uma
+	// integração.
+	GetIntegrationByUserID(ctx context.Context, userID uuid.UUID) (Integration, error)
+	// O caminho de autenticação, e é por isso que traz tudo de uma vez: a chave, a
+	// integração e a conta de serviço. Três consultas aqui seriam três idas ao
+	// banco em CADA requisição da API de integrações.
+	//
+	// A busca é pelo hash, que tem índice único. A chave em claro nunca é
+	// comparada contra nada no banco.
+	GetIntegrationKeyByHash(ctx context.Context, keyHash string) (GetIntegrationKeyByHashRow, error)
+	GetIntegrationWebhook(ctx context.Context, id uuid.UUID) (IntegrationWebhook, error)
 	// O filtro por deleted_at é o que faz a remoção no painel valer também para o
 	// login: sem ele, um usuário removido continuaria autenticando normalmente.
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
 	GetUsers(ctx context.Context) ([]User, error)
+	GetWebhookDelivery(ctx context.Context, id uuid.UUID) (IntegrationWebhookDelivery, error)
 	GetYoutubeAccountByID(ctx context.Context, id uuid.UUID) (YoutubeAccount, error)
 	GetYoutubeAccounts(ctx context.Context) ([]YoutubeAccount, error)
 	GetYoutubeAccountsForHealthCheck(ctx context.Context) ([]YoutubeAccount, error)
+	// Resumo da integração para a aba de visão geral.
+	IntegrationDownloadSummary(ctx context.Context, userID uuid.UUID) (IntegrationDownloadSummaryRow, error)
+	IntegrationRequestStats(ctx context.Context, arg IntegrationRequestStatsParams) (IntegrationRequestStatsRow, error)
+	// Falhas agrupadas por CAUSA, não por texto. É por isso que `error_code` é
+	// gravado junto da resposta: o painel mostra "quota_exceeded: 42" em vez de
+	// quarenta e duas linhas iguais.
+	IntegrationTopErrors(ctx context.Context, arg IntegrationTopErrorsParams) ([]IntegrationTopErrorsRow, error)
+	// De onde as chamadas vêm. É a resposta para "quem está batendo na minha API",
+	// que é exatamente o que se quer saber quando o volume sobe sem explicação.
+	IntegrationTopIPs(ctx context.Context, arg IntegrationTopIPsParams) ([]IntegrationTopIPsRow, error)
+	// Consultada pelo despachante a cada evento de ciclo de vida. Só os ativos: um
+	// webhook desligado não deve nem gerar linha de entrega.
+	ListActiveIntegrationWebhooks(ctx context.Context, integrationID uuid.UUID) ([]IntegrationWebhook, error)
+	ListIntegrationAPIKeys(ctx context.Context, integrationID uuid.UUID) ([]IntegrationApiKey, error)
+	// ---------------------------------------------------------------------------
+	// Downloads da integração
+	// ---------------------------------------------------------------------------
+	// A listagem que a API de integrações e a aba de downloads do painel usam.
+	//
+	// Existe separada de GetDownloadsByUser porque um sistema integrado precisa
+	// filtrar: o caso normal dele é "me devolva o que ainda está em andamento" ou
+	// "o que falhou hoje", e sem filtro no servidor ele teria de paginar o
+	// histórico inteiro para descobrir isso.
+	ListIntegrationDownloads(ctx context.Context, arg ListIntegrationDownloadsParams) ([]Download, error)
+	// A listagem de auditoria. `status_class` filtra por faixa (2, 4, 5) em vez de
+	// por código exato: quem investiga quer "os erros do cliente" ou "os nossos",
+	// não especificamente um 429.
+	ListIntegrationRequests(ctx context.Context, arg ListIntegrationRequestsParams) ([]IntegrationRequest, error)
+	ListIntegrationWebhooks(ctx context.Context, integrationID uuid.UUID) ([]IntegrationWebhook, error)
+	// Listagem do painel. Os números vêm na mesma consulta porque a tela mostra
+	// todos eles juntos, e uma chamada por integração transformaria a abertura da
+	// página em N+1 idas ao banco.
+	//
+	// `downloads_today` usa o MESMO corte de dia do contador do usuário comum
+	// (meia-noite em São Paulo, convertida para UTC). Um corte em UTC faria a cota
+	// virar às 21h e o painel discordaria da API.
+	ListIntegrations(ctx context.Context, arg ListIntegrationsParams) ([]ListIntegrationsRow, error)
+	ListWebhookDeliveries(ctx context.Context, arg ListWebhookDeliveriesParams) ([]ListWebhookDeliveriesRow, error)
 	// error_message é a mensagem PÚBLICA, lida pelo cliente. error_detail é o motivo
 	// técnico e nunca sai para um usuário comum.
 	MarkDownloadFinished(ctx context.Context, arg MarkDownloadFinishedParams) error
 	MarkDownloadStarted(ctx context.Context, id uuid.UUID) error
+	MarkWebhookDelivered(ctx context.Context, arg MarkWebhookDeliveredParams) error
+	// O contador de falhas consecutivas é o que permite desligar sozinho um
+	// endpoint que morreu: sem ele, um destino que responde 500 para sempre
+	// receberia reentrega eternamente.
+	MarkWebhookFailed(ctx context.Context, arg MarkWebhookFailedParams) (IntegrationWebhook, error)
+	// ---------------------------------------------------------------------------
+	// Retenção
+	// ---------------------------------------------------------------------------
+	// As duas tabelas de auditoria crescem a cada chamada e a cada notificação.
+	// Sem poda, a de requisições passa o histórico de downloads em volume e o
+	// painel fica lento por dado que ninguém mais vai olhar.
+	PruneIntegrationRequests(ctx context.Context, keepDays int32) (int64, error)
+	// Entregas concluídas são podadas; as que falharam sobrevivem mais tempo,
+	// porque é justamente nelas que alguém vai procurar o motivo.
+	PruneWebhookDeliveries(ctx context.Context, keepDays int32) (int64, error)
+	// Revogar é idempotente e preserva o carimbo original: uma segunda revogação
+	// não deve reescrever a data em que a chave de fato saiu do ar.
+	RevokeIntegrationAPIKey(ctx context.Context, arg RevokeIntegrationAPIKeyParams) (IntegrationApiKey, error)
+	// Usada ao regerar: a chave nova entra e todas as anteriores caem na mesma
+	// operação, porque "regerar" significa que o valor antigo não vale mais.
+	RevokeOtherIntegrationAPIKeys(ctx context.Context, arg RevokeOtherIntegrationAPIKeysParams) error
 	// Gravado pelo worker logo após o upload. É o que sustenta as métricas de
 	// armazenamento do painel: sem isto, o total do storage fica zerado para sempre.
 	SetDownloadFileSize(ctx context.Context, arg SetDownloadFileSizeParams) error
 	SetUserRoleByEmail(ctx context.Context, arg SetUserRoleByEmailParams) (User, error)
+	// Remoção lógica, como a de usuário: o histórico de downloads referencia a
+	// conta de serviço e responde pela contabilidade de armazenamento.
+	SoftDeleteIntegration(ctx context.Context, id uuid.UUID) error
+	SoftDeleteIntegrationWebhook(ctx context.Context, id uuid.UUID) error
+	// Gravado a cada uso. É o que responde "esta chave ainda é usada?" antes de
+	// revogar uma que parece esquecida.
+	TouchIntegrationAPIKey(ctx context.Context, arg TouchIntegrationAPIKeyParams) error
 	UpdateDownload(ctx context.Context, arg UpdateDownloadParams) error
 	// Gravado durante o download. Escreve pouco de propósito: o tempo real vai por
 	// SSE, e isto é só o último estado conhecido para a tela reabrir no meio.
 	UpdateDownloadProgress(ctx context.Context, arg UpdateDownloadProgressParams) error
 	UpdateDownloadStatus(ctx context.Context, arg UpdateDownloadStatusParams) error
+	UpdateIntegration(ctx context.Context, arg UpdateIntegrationParams) (Integration, error)
+	UpdateIntegrationWebhook(ctx context.Context, arg UpdateIntegrationWebhookParams) (IntegrationWebhook, error)
 	UpdateUser(ctx context.Context, arg UpdateUserParams) error
 	UpdateUserLoginInfo(ctx context.Context, id uuid.UUID) error
+	// O cast explícito não é decoração: o mesmo parâmetro é usado como valor da
+	// coluna e dentro do CASE, e sem ele o Postgres deduz tipos diferentes para os
+	// dois usos e recusa a consulta com "inconsistent types deduced for parameter".
+	// O sintoma é cruel: a entrega acontece, o cliente recebe, e o registro dela
+	// nunca é atualizado — o painel mostra tudo como pendente para sempre.
+	UpdateWebhookDeliveryResult(ctx context.Context, arg UpdateWebhookDeliveryResultParams) error
 	UpdateYoutubeAccount(ctx context.Context, arg UpdateYoutubeAccountParams) (YoutubeAccount, error)
 	// O cast explícito é necessário: sem ele o Postgres deduz tipos diferentes para
 	// o mesmo parâmetro, usado como valor da coluna e dentro do CASE.
 	UpdateYoutubeAccountStatus(ctx context.Context, arg UpdateYoutubeAccountStatusParams) (YoutubeAccount, error)
+	// Números da aba de entregas, na janela que a tela pediu.
+	WebhookDeliveryStats(ctx context.Context, arg WebhookDeliveryStatsParams) (WebhookDeliveryStatsRow, error)
 }
 
 var _ Querier = (*Queries)(nil)

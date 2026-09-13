@@ -27,6 +27,8 @@
 - 📥 Execução de download com yt-dlp
 - 🔁 Envio de status em tempo real via SSE (`GET /downloads/:id/stream`)
 - 📊 Histórico e status de tarefas (em breve com banco de dados)
+- 🔌 API para integrar outros sistemas: chave de API, cota, limites por IP,
+  webhooks assinados e auditoria por integração
 - ⚙️ Pronto para escalar com múltiplos workers
 
 ---
@@ -50,7 +52,11 @@ yt-dlp-downloader/
 │   │               # conhece o binário
 │   ├── providers/  # Monta o conjunto de providers
 │   ├── ytaccounts/ # Sessões das contas entregues ao downloader
+│   ├── integrations/ # Chaves de API, webhooks e controle de abuso dos
+│   │                 # sistemas integrados
 │   └── libs/       # Storage (R2) e streams do Redis
+├── docs/
+│   └── api-integracoes.md  # Guia da API consumida por outros sistemas
 ├── compose.dev.yaml    # Ambiente local completo
 ├── go.mod
 └── README.md
@@ -771,6 +777,167 @@ há `--enable-automation`, e o login do Google segue normal.
 GitHub Container Registry pelos workflows em `.github/workflows/`. Os dois não
 devem conviver no mesmo servidor.
 
+## 🔌 Integrações (a API consumida por outros sistemas)
+
+A mesma engrenagem que atende a tela — mesma fila, mesmos providers, mesmo
+armazenamento — exposta para ser consumida por programa, com autenticação por
+chave de API em vez de login.
+
+**Guia completo:** [`docs/api-integracoes.md`](docs/api-integracoes.md).
+**Referência viva:** `GET /docs` e `GET /openapi.yaml`, servidos pela própria
+API (`DOCS_ENABLED`).
+
+### Uma integração É uma conta
+
+Esta é a decisão que governa todo o resto. Cada integração possui uma linha em
+`users` com `kind = 'service'`, e os downloads dela usam a coluna
+`downloads.user_id` de sempre.
+
+Sem isso, cada recurso já existente — cota diária, histórico paginado, expiração
+de arquivo, contabilidade de armazenamento, eventos de tempo real, painel de
+downloads — precisaria de um segundo caminho que fizesse a mesma coisa por um
+identificador diferente, e cada correção futura teria de ser aplicada duas
+vezes. Foi o mesmo raciocínio que fez a rota antiga de download delegar à nova
+em vez de duplicar a lógica.
+
+O que a conta de serviço NÃO compartilha é a forma de autenticar: ela não tem
+senha utilizável (o hash guardado não é um bcrypt válido, então a comparação
+falha para qualquer entrada), não aparece na tela de Usuários e é barrada no
+`/auth/login` e no middleware de token. Quem prova identidade é a chave de API,
+com a lista de IPs e o limitador que vêm junto.
+
+### As rotas de download são literalmente as mesmas
+
+`POST /v1/integration/downloads` e a criação da tela chamam a mesma função. O
+middleware da chave de API deixa a conta de serviço no contexto pela MESMA chave
+que o login usa, e os handlers não sabem qual dos dois autenticou — só o formato
+da resposta difere.
+
+Esse foi o motivo de um refactor no caminho: os handlers de download liam o
+payload do token e iam ao banco buscar o usuário de novo. Agora leem o usuário
+que o middleware já carregou, o que removeu uma consulta repetida por requisição
+e um `MustGet` que derrubaria o processo em rota sem autenticação.
+
+### Webhooks se penduram no stream que já existe
+
+O worker já publica cada transição de status em um stream do Redis, que a API
+consome para alimentar o SSE da tela. O despachante de webhooks se pendura no
+**mesmo** consumidor, em vez de pedir que cada job avise os webhooks.
+
+`internal/jobs` continua sem nenhuma noção de integração: qualquer transição que
+apareça na tela chega ao sistema integrado pelo mesmo caminho, e um estado novo
+no futuro não precisa ser publicado em dois lugares. Um segundo consumidor criaria
+um grupo concorrente no mesmo stream, e cada evento iria para apenas um dos dois
+destinos — metade das atualizações deixaria de aparecer na tela.
+
+A entrega roda no **worker**, em fila própria: ela depende de um servidor de
+terceiro responder, e um endpoint lento na mão de um cliente não pode ocupar nem
+a goroutine que atende as requisições HTTP nem os slots que deveriam estar
+baixando vídeo.
+
+### O que protege a plataforma
+
+Quatro controles, porque cada um contém um abuso diferente:
+
+| Controle | Onde vive | Contém |
+|---|---|---|
+| Chamadas por minuto, por CHAVE | Redis | Laço apertado derrubando a API |
+| Downloads simultâneos | Postgres | Gastar a cota do dia toda de uma vez, ocupando o worker |
+| Cota diária | Postgres | Consumo além do contratado |
+| Lista de IPs autorizados | Postgres | Chave vazada sendo usada de qualquer lugar |
+
+O limite por minuto é por chave, e não por integração: quando há várias chaves
+(uma por ambiente, por exemplo), o consumo descontrolado de uma não derruba as
+outras. Ele falha ABERTO se o Redis estiver fora — recusar toda chamada de toda
+integração por causa de um componente auxiliar transformaria degradação em
+indisponibilidade total, e a cota e os simultâneos continuam valendo porque
+vivem no Postgres.
+
+### A chave de API
+
+Guardada como **hash SHA-256**, nunca em claro. O valor completo existe uma
+única vez: na resposta que a criou. Um vazamento do banco não entrega acesso às
+integrações, e nem quem opera o painel consegue recuperar a chave de um cliente
+— só emitir outra.
+
+SHA-256 e não bcrypt, ao contrário da senha de usuário, porque a origem do
+segredo é outra: a chave é gerada por nós com 256 bits de `crypto/rand`, não
+escolhida por uma pessoa. Não há senha fraca a proteger nem dicionário a
+atrasar, e um hash deliberadamente lento entraria no caminho de CADA requisição
+autenticada.
+
+### SSRF: a URL do webhook é escolhida por quem cadastra
+
+E é o servidor que faz a requisição. Sem cuidado, o campo de URL do painel é uma
+sonda da rede interna. Três camadas:
+
+1. **No cadastro** — só `https`, sem credencial na URL, e o host tem de resolver
+   para endereço público. `169.254.169.254` (metadados da instância),
+   `10.0.0.0/8`, `127.0.0.1`, `100.64.0.0/10` e afins são recusados.
+2. **Na discagem** — o dialer confere o IP real na hora de conectar, fechando a
+   janela do DNS rebinding (validar o nome no cadastro e ele passar a resolver
+   para um endereço interno depois).
+3. **Sem redirecionamento** — um endpoint que responde `302` para um endereço
+   interno não é seguido.
+
+`WEBHOOK_ALLOW_PRIVATE=true` desliga as três e existe SOMENTE para
+desenvolvimento, onde o sistema integrado roda em localhost.
+
+### Auditoria fora do caminho da resposta
+
+Cada chamada gera uma linha em `integration_requests` — IP, rota, status, código
+de erro, tempo —, gravada por escritores dedicados que consomem uma fila em
+memória. Gravar de forma síncrona dobraria as idas ao Postgres por requisição.
+O contrato é explícito: sob pressão extrema, perde-se REGISTRO, nunca
+disponibilidade.
+
+É essa tabela que responde, no painel, as perguntas que aparecem quando algo vai
+mal: de qual IP veio, qual chave usou, qual rota, o que respondemos e quanto
+demorou. Tentativas recusadas por IP ou por chave revogada TAMBÉM entram — são
+justamente as que interessam numa investigação, e é por isso que a integração é
+registrada no contexto assim que a chave é reconhecida, antes das checagens de
+acesso.
+
+A poda roda de madrugada (`INTEGRATION_LOG_RETENTION_DAYS`, padrão 30 dias). As
+entregas que falharam sobrevivem três vezes mais tempo: é nelas que alguém vai
+procurar o motivo, muito depois do dia em que aconteceram.
+
+### Duas camadas de mensagem, de novo
+
+O mesmo princípio que separa `error_message` de `error_detail` no download vale
+aqui. Um sistema cliente não é mais confiável que um usuário comum:
+
+- `provider` (o mecanismo que baixa) e `error_detail` (o motivo técnico, muitas
+  vezes com saída de processo) **nunca** saem para uma integração;
+- o **segredo de assinatura** do webhook não sai pela API, só pelo painel: se
+  saísse por uma rota autenticada pela chave, um vazamento de chave viraria
+  também um vazamento do segredo — e com ele daria para forjar eventos assinados
+  para o endpoint do cliente;
+- download de outra integração responde `404`, não `403`. Distinguir "não
+  existe" de "existe e não é seu" seria um oráculo para enumerar os
+  identificadores dos outros.
+
+### Painel
+
+**Administração → Integrações**, só para super admin. Cada integração tem abas
+de visão geral, chaves de API, webhooks, entregas, requisições/IPs e downloads.
+
+A aba de **entregas** é a que encerra a discussão mais comum de qualquer
+integração por webhook — "vocês enviaram?" / "não recebi" — com o corpo exato do
+POST, o que o endpoint respondeu e quantas tentativas foram feitas.
+
+### Configuração
+
+Ver o bloco de integrações em `api/.env.example`. Em produção, o essencial:
+
+```env
+PUBLIC_API_URL=https://api.seu-dominio.com   # usado nos links do payload
+WEBHOOK_ALLOW_PRIVATE=false                  # NUNCA true em produção
+DOCS_ENABLED=true
+```
+
+---
+
 ## 📌 Próximas Melhorias
 
 - [ ] Armazenamento persistente no PostgreSQL
@@ -778,6 +945,7 @@ devem conviver no mesmo servidor.
 - [ ] Dashboard com histórico e progresso em tempo real
 - [x] Autenticação e controle de acesso
 - [x] Gerenciamento de contas do YouTube pelo Super Admin
+- [x] API para integração com outros sistemas (chaves, cotas, webhooks e auditoria)
 
 ---
 

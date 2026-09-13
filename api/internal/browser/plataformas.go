@@ -45,10 +45,10 @@ type PerfilPlataforma struct {
 	// MetadadosExigemSessao diz se até a LEITURA de metadados precisa de conta.
 	//
 	// Buscar os cookies custa caro — pode subir um Chrome headless sobre o
-	// perfil —, e a resolução roda dentro da requisição HTTP do usuário. Por
-	// isso não é feito por padrão: só onde resolver anônimo comprovadamente
-	// falha. O YouTube resolve bem sem conta, e pagar esse custo em todo
-	// resolve dele seria uma regressão de segundos por link colado.
+	// perfil —, e a resolução roda dentro da requisição HTTP do usuário. O
+	// custo é pago onde resolver anônimo comprovadamente falha, e amortizado
+	// pelo cache de jar do pacote ytaccounts: a primeira resolução da conta
+	// paga o Chrome, as seguintes reaproveitam o mesmo jar.
 	MetadadosExigemSessao bool
 }
 
@@ -82,6 +82,13 @@ var perfis = map[string]PerfilPlataforma{
 			"SID", "__Secure-1PSID", "__Secure-3PSID",
 			"LOGIN_INFO", "SAPISID", "__Secure-1PAPISID",
 		},
+		// O YouTube resolvia anônimo quando este perfil foi escrito, e por
+		// isso a resolução não gastava uma sessão com ele. Não resolve mais de
+		// um IP de datacenter: a primeira requisição volta com "Sign in to
+		// confirm you're not a bot", ANTES de o usuário chegar à escolha de
+		// qualidade. O download já emprestava a conta e passava; só a leitura
+		// de metadados ia sem ela, e era ela que barrava todo mundo na tela.
+		MetadadosExigemSessao: true,
 	},
 	"vimeo": {
 		ID:          "vimeo",

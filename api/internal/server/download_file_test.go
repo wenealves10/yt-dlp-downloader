@@ -16,7 +16,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/wenealves10/yt-dlp-downloader/internal/db"
 	"github.com/wenealves10/yt-dlp-downloader/internal/libs/storage"
-	"github.com/wenealves10/yt-dlp-downloader/internal/tokens"
 )
 
 type downloadStoreStub struct {
@@ -76,7 +75,10 @@ func TestDownloadURLCreatesShortLivedR2Link(t *testing.T) {
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodGet, "/v1/downloads/"+downloadID.String()+"/download-url", nil)
 	ctx.Params = gin.Params{{Key: "id", Value: downloadID.String()}}
-	ctx.Set(authorizationPayloadKey, &tokens.Payload{UserID: userID.String()})
+	// O middleware de autenticação deixa no contexto o USUÁRIO já
+	// carregado; é dele que os handlers de download tiram o dono da
+	// requisição, o que faz as mesmas rotas atenderem pessoa e integração.
+	ctx.Set(authorizationUserKey, db.User{ID: userID})
 
 	server.downloadURL(ctx)
 
@@ -117,7 +119,10 @@ func TestDownloadURLRejectsExpiredDownload(t *testing.T) {
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodGet, "/v1/downloads/"+downloadID.String()+"/download-url", nil)
 	ctx.Params = gin.Params{{Key: "id", Value: downloadID.String()}}
-	ctx.Set(authorizationPayloadKey, &tokens.Payload{UserID: userID.String()})
+	// O middleware de autenticação deixa no contexto o USUÁRIO já
+	// carregado; é dele que os handlers de download tiram o dono da
+	// requisição, o que faz as mesmas rotas atenderem pessoa e integração.
+	ctx.Set(authorizationUserKey, db.User{ID: userID})
 
 	server.downloadURL(ctx)
 
@@ -171,7 +176,10 @@ func TestDownloadFileStreamsAttachment(t *testing.T) {
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodGet, "/v1/downloads/"+downloadID.String()+"/file", nil)
 	ctx.Params = gin.Params{{Key: "id", Value: downloadID.String()}}
-	ctx.Set(authorizationPayloadKey, &tokens.Payload{UserID: userID.String()})
+	// O middleware de autenticação deixa no contexto o USUÁRIO já
+	// carregado; é dele que os handlers de download tiram o dono da
+	// requisição, o que faz as mesmas rotas atenderem pessoa e integração.
+	ctx.Set(authorizationUserKey, db.User{ID: userID})
 
 	server.downloadFile(ctx)
 
@@ -205,10 +213,15 @@ func TestDownloadFileRejectsAnotherUsersFile(t *testing.T) {
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodGet, "/v1/downloads/"+downloadID.String()+"/file", nil)
 	ctx.Params = gin.Params{{Key: "id", Value: downloadID.String()}}
-	ctx.Set(authorizationPayloadKey, &tokens.Payload{UserID: uuid.New().String()})
+	ctx.Set(authorizationUserKey, db.User{ID: uuid.New()})
 
 	server.downloadFile(ctx)
 
-	require.Equal(t, http.StatusForbidden, recorder.Code)
+	// 404 e não 403: um 403 confirmaria que aquele identificador existe. Na
+	// tela isso seria irrelevante, mas o mesmo handler atende a API de
+	// integrações, onde vários sistemas convivem — ali a diferença entre "não
+	// existe" e "existe e não é seu" seria um oráculo para enumerar os
+	// downloads dos outros.
+	require.Equal(t, http.StatusNotFound, recorder.Code)
 	require.Empty(t, storageStub.requested)
 }

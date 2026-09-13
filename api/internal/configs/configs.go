@@ -86,6 +86,38 @@ type Config struct {
 	MediaDownloadTimeout time.Duration `mapstructure:"MEDIA_DOWNLOAD_TIMEOUT"`
 	MediaWorkDir         string        `mapstructure:"MEDIA_WORK_DIR"`
 
+	// ---------------------------------------------------------------------
+	// Integrações (API para outros sistemas)
+	// ---------------------------------------------------------------------
+
+	// PublicAPIURL é a URL pública desta API, usada para montar os links que
+	// vão no corpo do webhook ("onde buscar o arquivo deste download").
+	//
+	// Não é derivável da requisição: o evento é montado pelo despachante, fora
+	// de qualquer requisição HTTP, e atrás de proxy o Host visto pelo processo
+	// não é o que o cliente usa. Vazio apenas omite os links.
+	PublicAPIURL string `mapstructure:"PUBLIC_API_URL"`
+
+	// Teto por tentativa de entrega de webhook.
+	WebhookTimeout time.Duration `mapstructure:"WEBHOOK_TIMEOUT"`
+
+	// Espaçamento mínimo entre dois eventos de progresso do MESMO download.
+	// O worker publica progresso várias vezes por segundo; repassar tudo
+	// inundaria o servidor do cliente com notificações que ele não pediu.
+	WebhookProgressInterval time.Duration `mapstructure:"WEBHOOK_PROGRESS_INTERVAL"`
+
+	// Permite webhook para endereço privado/localhost. Escape hatch de
+	// DESENVOLVIMENTO: em produção isso transformaria o cadastro de URL em
+	// varredura da rede interna (SSRF).
+	WebhookAllowPrivate bool `mapstructure:"WEBHOOK_ALLOW_PRIVATE"`
+
+	// Por quantos dias a auditoria de requisições e as entregas concluídas são
+	// mantidas. As duas tabelas crescem a cada chamada e a cada notificação.
+	IntegrationLogRetentionDays int `mapstructure:"INTEGRATION_LOG_RETENTION_DAYS"`
+
+	// Publica a documentação da API em /docs e /openapi.yaml.
+	DocsEnabled bool `mapstructure:"DOCS_ENABLED"`
+
 	// Configuração exclusiva do serviço de navegador.
 	BrowserListenAddress string        `mapstructure:"BROWSER_LISTEN_ADDRESS"`
 	BrowserProfilesDir   string        `mapstructure:"BROWSER_PROFILES_DIR"`

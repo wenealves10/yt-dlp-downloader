@@ -19,7 +19,6 @@ import (
 	"github.com/wenealves10/yt-dlp-downloader/internal/media"
 	"github.com/wenealves10/yt-dlp-downloader/internal/queues"
 	"github.com/wenealves10/yt-dlp-downloader/internal/tasks"
-	"github.com/wenealves10/yt-dlp-downloader/internal/tokens"
 	"github.com/wenealves10/yt-dlp-downloader/internal/utils"
 	"github.com/wenealves10/yt-dlp-downloader/internal/ytaccounts"
 )
@@ -151,32 +150,55 @@ func (s *Server) createMediaDownload(ctx *gin.Context) {
 	s.criarDownloadMedia(ctx, req)
 }
 
-// criarDownloadMedia é o caminho único de criação de download, compartilhado
-// pela rota nova e pela antiga.
+// criarDownloadMedia responde a criação para a TELA (usuário autenticado por
+// token). A preparação em si está em prepararDownloadMedia, que é compartilhada
+// com a API de integrações: as duas superfícies criam o download exatamente do
+// mesmo jeito e diferem só no formato da resposta.
 func (s *Server) criarDownloadMedia(ctx *gin.Context, req criarDownloadMediaRequest) {
+	download, ok := s.prepararDownloadMedia(ctx, req)
+	if !ok {
+		return
+	}
+
+	ctx.JSON(http.StatusCreated, gin.H{
+		"id":             download.ID.String(),
+		"status":         download.Status,
+		"title":          download.Title,
+		"platform":       download.Platform,
+		"platform_label": media.Platform(download.Platform).Label(),
+		"quality_label":  download.QualityLabel.String,
+		"thumbnail_url":  download.ThumbnailUrl.String,
+		"created_at":     download.CreatedAt,
+	})
+}
+
+// prepararDownloadMedia resolve, valida os limites, grava e enfileira.
+//
+// Devolve o download criado e um booleano que diz se a requisição já foi
+// respondida com erro. Quem chama renderiza a resposta de sucesso na forma da
+// sua superfície — e é só isso que as duas não compartilham.
+func (s *Server) prepararDownloadMedia(ctx *gin.Context, req criarDownloadMediaRequest) (db.Download, bool) {
 	if s.mediaRegistry == nil {
 		ctx.JSON(http.StatusServiceUnavailable,
 			errorResponse(errors.New(media.PublicMessage(media.ErrProviderUnavailable))))
-		return
+		return db.Download{}, false
 	}
 
-	authPayload := ctx.MustGet(authorizationPayloadKey).(*tokens.Payload)
-	userID, err := utils.ParseUUID(authPayload.UserID)
-	if err != nil {
-		ctx.JSON(http.StatusBadRequest, errorResponse(errors.New("usuário inválido")))
-		return
+	// Pessoa ou sistema: o middleware que autenticou já deixou a linha de
+	// `users` no contexto, e a criação do download não precisa saber qual dos
+	// dois foi. É o que permite à API de integrações reaproveitar exatamente
+	// este caminho, com toda a lógica de formato e sessão que ele já carrega.
+	user, autenticado := usuarioAtual(ctx)
+	if !autenticado {
+		ctx.JSON(http.StatusUnauthorized, errorResponse(errors.New("requisição não autenticada")))
+		return db.Download{}, false
 	}
-
-	user, err := s.store.GetUserByID(ctx.Request.Context(), userID)
-	if err != nil {
-		ctx.JSON(http.StatusNotFound, errorResponse(errors.New("usuário não encontrado")))
-		return
-	}
+	userID := user.ID
 
 	normalizada, _, err := media.NormalizeURL(req.URL)
 	if err != nil {
 		ctx.JSON(statusPara(err), respostaDeErro(ctx, err))
-		return
+		return db.Download{}, false
 	}
 
 	// A resolução da tela é reaproveitada: além de poupar uma ida à
@@ -196,7 +218,7 @@ func (s *Server) criarDownloadMedia(ctx *gin.Context, req criarDownloadMediaRequ
 		if err != nil {
 			log.Printf("media: falha ao resolver na criação: %v", err)
 			ctx.JSON(statusPara(err), respostaDeErro(ctx, err))
-			return
+			return db.Download{}, false
 		}
 	}
 
@@ -218,16 +240,16 @@ func (s *Server) criarDownloadMedia(ctx *gin.Context, req criarDownloadMediaRequ
 				"error": media.ErrFormatUnavailable.Error(),
 				"code":  "format_unavailable",
 			})
-			return
+			return db.Download{}, false
 		}
 		log.Printf("media: formato %q não está mais disponível; usando o melhor de %s",
 			req.FormatID, kind)
 		escolhido, _ = escolherFormato(metadata.Formats, "", kind)
 	}
 
-	if resposta, excedeu := s.limiteExcedido(user, escolhido.SizeBytes); excedeu {
+	if resposta, excedeu := s.limiteExcedido(ctx, user, escolhido.SizeBytes); excedeu {
 		ctx.JSON(http.StatusBadRequest, resposta)
-		return
+		return db.Download{}, false
 	}
 
 	download, err := s.store.CreateMediaDownload(ctx.Request.Context(), db.CreateMediaDownloadParams{
@@ -253,7 +275,7 @@ func (s *Server) criarDownloadMedia(ctx *gin.Context, req criarDownloadMediaRequ
 	if err != nil {
 		log.Printf("media: falha ao criar download: %v", err)
 		ctx.JSON(http.StatusInternalServerError, errorResponse(errors.New("falha ao criar o download")))
-		return
+		return db.Download{}, false
 	}
 
 	task, err := tasks.NewDownloadMediaTask(download.ID.String())
@@ -272,39 +294,45 @@ func (s *Server) criarDownloadMedia(ctx *gin.Context, req criarDownloadMediaRequ
 			ErrorDetail:  pgtype.Text{String: "falha ao enfileirar a tarefa de download", Valid: true},
 		})
 		ctx.JSON(http.StatusInternalServerError, errorResponse(errors.New("não foi possível iniciar o download")))
-		return
+		return db.Download{}, false
 	}
 
 	log.Printf("media: download criado id=%s plataforma=%s provider=%s formato=%s",
 		download.ID, metadata.Platform, metadata.Provider, escolhido.Label)
 
-	ctx.JSON(http.StatusCreated, gin.H{
-		"id":             download.ID.String(),
-		"status":         download.Status,
-		"title":          download.Title,
-		"platform":       string(metadata.Platform),
-		"platform_label": metadata.Platform.Label(),
-		"quality_label":  escolhido.Label,
-		"thumbnail_url":  metadata.Thumbnail,
-		"created_at":     download.CreatedAt,
-	})
+	return download, true
 }
 
 // cancelDownload marca o pedido e avisa o worker. A marcação no banco é o que
 // vale para a tela; a chave no Redis é o que alcança um processo já em
 // andamento.
 func (s *Server) cancelDownload(ctx *gin.Context) {
-	downloadID, err := uuid.Parse(ctx.Param("id"))
-	if err != nil {
-		ctx.JSON(http.StatusBadRequest, errorResponse(errors.New("identificador inválido")))
+	download, ok := s.cancelarDownload(ctx)
+	if !ok {
 		return
 	}
+	ctx.JSON(http.StatusOK, gin.H{"id": download.ID.String(), "status": download.Status})
+}
 
-	authPayload := ctx.MustGet(authorizationPayloadKey).(*tokens.Payload)
-	userID, err := utils.ParseUUID(authPayload.UserID)
+// cancelarDownload faz o cancelamento em si, para as duas superfícies.
+//
+// O corpo da resposta é de quem chama: a tela quer o par (id, status) e a API
+// de integrações devolve o download inteiro, como em todas as outras rotas
+// dela. O que NÃO pode divergir é isto aqui — a ordem entre a chave do Redis e
+// o UPDATE, que é o que faz o cancelamento alcançar um processo em andamento.
+func (s *Server) cancelarDownload(ctx *gin.Context) (db.Download, bool) {
+	downloadID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, errorResponse(errors.New("usuário inválido")))
-		return
+		registrarCodigoErro(ctx, CodeInvalidRequest)
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"error": "identificador inválido", "code": CodeInvalidRequest,
+		})
+		return db.Download{}, false
+	}
+
+	userID, autenticado := usuarioAtualID(ctx)
+	if !autenticado {
+		return db.Download{}, false
 	}
 
 	// A chave do Redis vem ANTES do UPDATE, e é gravada mesmo que o banco
@@ -328,11 +356,17 @@ func (s *Server) cancelDownload(ctx *gin.Context) {
 		if errors.Is(err, pgx.ErrNoRows) {
 			// Só sobra o caso de o download não existir ou não ser deste
 			// usuário — aí é 404 mesmo, e não um conflito.
-			ctx.JSON(http.StatusNotFound, errorResponse(errors.New("download não encontrado")))
-			return
+			registrarCodigoErro(ctx, CodeNotFound)
+			ctx.JSON(http.StatusNotFound, gin.H{
+				"error": "download não encontrado", "code": CodeNotFound,
+			})
+			return db.Download{}, false
 		}
-		ctx.JSON(http.StatusInternalServerError, errorResponse(errors.New("falha ao cancelar")))
-		return
+		registrarCodigoErro(ctx, CodeInternalError)
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"error": "falha ao cancelar", "code": CodeInternalError,
+		})
+		return db.Download{}, false
 	}
 
 	// A tela não espera o worker perceber: quem cancelou precisa ver o card
@@ -343,7 +377,7 @@ func (s *Server) cancelDownload(ctx *gin.Context) {
 	}
 
 	log.Printf("media: cancelamento pedido id=%s por=%s status=%s", downloadID, userID, download.Status)
-	ctx.JSON(http.StatusOK, gin.H{"id": download.ID.String(), "status": download.Status})
+	return download, true
 }
 
 // publicarCancelamento avisa a tela imediatamente. Uma falha aqui não é motivo
@@ -401,10 +435,18 @@ func (s *Server) sessaoPara(ctx context.Context, bruta string) (*ytaccounts.Leas
 	plataforma := string(media.PlatformFor(parsed))
 	estado := sessaoUsada{Plataforma: plataforma}
 
+	// Uma plataforma sem perfil de login (Dailymotion, Twitch, SoundCloud) não
+	// tem conta para emprestar. PerfilDe cai no padrão quando não conhece a
+	// plataforma, então sem esta checagem um link do Dailymotion acabaria
+	// pedindo uma sessão e sendo informado de que falta conta "do YouTube".
+	if !browser.PlataformaSuportada(plataforma) {
+		return nil, estado
+	}
+
 	// Só onde resolver anônimo comprovadamente falha. Buscar os cookies pode
-	// subir um Chrome headless sobre o perfil, e isso roda dentro da
-	// requisição de quem colou o link: pagar esse custo no YouTube, que
-	// resolve bem sem conta, seria trocar um problema por outro.
+	// subir um Chrome headless sobre o perfil, e isso roda dentro da requisição
+	// de quem colou o link — por isso o pacote ytaccounts guarda o jar por uma
+	// janela curta, e só a primeira resolução da conta paga esse custo.
 	if !browser.PerfilDe(plataforma).MetadadosExigemSessao {
 		return nil, estado
 	}
@@ -504,9 +546,32 @@ func pareceFormatoDoProvider(formatoID string) bool {
 	return formatoID[0] != '-'
 }
 
-// limiteExcedido aplica os tetos por plano que o projeto já tem.
-func (s *Server) limiteExcedido(user db.User, tamanho int64) (gin.H, bool) {
-	if user.Role == db.CoreUserRoleSuperAdmin || tamanho <= 0 {
+// limiteExcedido aplica o teto de tamanho de arquivo.
+//
+// São duas origens de limite, e a ordem importa: quando a requisição vem de uma
+// INTEGRAÇÃO, vale o teto configurado nela; caso contrário, valem os tetos por
+// plano do usuário. Um sistema não tem plano — ele tem contrato —, e cair no
+// ramo dos planos daria a ele o limite do plano 'enterprise' da conta de
+// serviço, que é nenhum.
+func (s *Server) limiteExcedido(ctx *gin.Context, user db.User, tamanho int64) (gin.H, bool) {
+	if tamanho <= 0 {
+		return nil, false
+	}
+
+	if integracao, ehIntegracao := currentIntegration(ctx); ehIntegracao {
+		if integracao.MaxFileSizeBytes > 0 && tamanho > integracao.MaxFileSizeBytes {
+			registrarCodigoErro(ctx, CodeFileTooLarge)
+			return gin.H{
+				"error": "o tamanho do arquivo excede o limite desta integração",
+				"code":  CodeFileTooLarge,
+				"limit": integracao.MaxFileSizeBytes,
+				"size":  tamanho,
+			}, true
+		}
+		return nil, false
+	}
+
+	if user.Role == db.CoreUserRoleSuperAdmin {
 		return nil, false
 	}
 
@@ -522,6 +587,10 @@ func (s *Server) limiteExcedido(user db.User, tamanho int64) (gin.H, bool) {
 
 	if limite > 0 && tamanho > limite {
 		return gin.H{
+			// "error" acompanha "message" para que TODA resposta de erro da API
+			// tenha o mesmo par (error, code). A chave antiga fica: a tela já
+			// a lê, e removê-la quebraria o aviso de arquivo grande.
+			"error":   "O tamanho do arquivo excede o limite do seu plano",
 			"code":    "limit_exceeded",
 			"message": "O tamanho do arquivo excede o limite do seu plano",
 			"limit":   limite,

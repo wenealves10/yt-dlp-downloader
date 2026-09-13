@@ -3,6 +3,7 @@ package server
 import (
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 
@@ -78,6 +79,21 @@ func authorizeToken(ctx *gin.Context, tokenCreator tokens.TokenCreator, store db
 	user, err := store.GetUserByEmail(ctx, payload.Email)
 	if err != nil {
 		ctx.AbortWithStatusJSON(http.StatusUnauthorized, errorResponse(errors.New("usuário não encontrado")))
+		return false
+	}
+
+	// Conta de SERVIÇO não autentica por token de usuário.
+	//
+	// Ela não tem senha utilizável, então nenhum login deveria emitir um token
+	// para ela — mas a checagem fica aqui de todo modo: é a barreira que
+	// garante que uma conta de integração só seja alcançável pela chave de API,
+	// com a lista de IPs e o limitador que vêm junto. Sem ela, bastaria um
+	// caminho futuro de emissão de token (recuperação de senha, impersonação
+	// de suporte) para abrir uma porta lateral sem nenhum desses controles.
+	if user.Kind == db.CoreUserKindService {
+		log.Printf("auth: tentativa de login com conta de serviço user_id=%s", user.ID)
+		ctx.AbortWithStatusJSON(http.StatusForbidden,
+			errorResponse(errors.New("esta conta é de integração e autentica apenas por chave de API")))
 		return false
 	}
 

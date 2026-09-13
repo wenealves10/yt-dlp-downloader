@@ -12,6 +12,8 @@ import { DashboardPage } from "./components/admin/DashboardPage";
 import { UsersPage } from "./components/admin/UsersPage";
 import { DownloadsPage } from "./components/admin/DownloadsPage";
 import { ProvidersPage } from "./components/admin/ProvidersPage";
+import { IntegrationsPage } from "./components/admin/IntegrationsPage";
+import { IntegrationDetailPage } from "./components/admin/IntegrationDetailPage";
 import Loading from "./components/loading/Loading";
 
 // O cliente noVNC pesa algumas centenas de kB e só interessa ao super admin.
@@ -45,6 +47,11 @@ export const App = () => {
         <Route path="/admin/users" element={<UsersPage />} />
         <Route path="/admin/downloads" element={<DownloadsPage />} />
         <Route path="/admin/providers" element={<ProvidersPage />} />
+        <Route path="/admin/integrations" element={<IntegrationsPage />} />
+        <Route
+          path="/admin/integrations/:id"
+          element={<IntegrationDetailPage />}
+        />
         <Route
           path="/admin/youtube/accounts"
           element={<YoutubeAccountsPage />}

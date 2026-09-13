@@ -56,6 +56,11 @@ func (q *Queries) AdminCountSuperAdmins(ctx context.Context) (int64, error) {
 const adminCountUsers = `-- name: AdminCountUsers :one
 SELECT COUNT(*) FROM users u
 WHERE u.deleted_at IS NULL
+  -- Contas de SERVIÇO ficam fora: elas são gerenciadas pela seção de
+  -- integrações, e não por esta tela. Listá-las aqui ofereceria ao
+  -- administrador botões que não valem para elas (redefinir senha,
+  -- promover a admin) e misturaria sistemas com pessoas na contagem.
+  AND u.kind = 'human'
   AND (
     $1::text IS NULL
     OR lower(u.full_name) LIKE '%' || lower($1::text) || '%'
@@ -270,7 +275,7 @@ func (q *Queries) AdminDownloadsTimeSeries(ctx context.Context, arg AdminDownloa
 
 const adminGetUserDetail = `-- name: AdminGetUserDetail :one
 SELECT
-  u.id, u.full_name, u.photo_url, u.email, u.hashed_password, u.password_changed_at, u.active, u.plan, u.daily_limit, u.last_login, u.is_verified, u.created_at, u.updated_at, u.role, u.deleted_at,
+  u.id, u.full_name, u.photo_url, u.email, u.hashed_password, u.password_changed_at, u.active, u.plan, u.daily_limit, u.last_login, u.is_verified, u.created_at, u.updated_at, u.role, u.deleted_at, u.kind,
   COUNT(d.id) FILTER (WHERE d.deleted_at IS NULL)::bigint AS downloads_total,
   COUNT(d.id) FILTER (WHERE d.deleted_at IS NULL AND d.status = 'COMPLETED')::bigint AS downloads_completed,
   COUNT(d.id) FILTER (WHERE d.deleted_at IS NULL AND d.status = 'FAILED')::bigint AS downloads_failed,
@@ -301,6 +306,7 @@ type AdminGetUserDetailRow struct {
 	UpdatedAt          *time.Time         `json:"updated_at"`
 	Role               CoreUserRole       `json:"role"`
 	DeletedAt          pgtype.Timestamptz `json:"deleted_at"`
+	Kind               CoreUserKind       `json:"kind"`
 	DownloadsTotal     int64              `json:"downloads_total"`
 	DownloadsCompleted int64              `json:"downloads_completed"`
 	DownloadsFailed    int64              `json:"downloads_failed"`
@@ -327,6 +333,7 @@ func (q *Queries) AdminGetUserDetail(ctx context.Context, id uuid.UUID) (AdminGe
 		&i.UpdatedAt,
 		&i.Role,
 		&i.DeletedAt,
+		&i.Kind,
 		&i.DownloadsTotal,
 		&i.DownloadsCompleted,
 		&i.DownloadsFailed,
@@ -461,7 +468,7 @@ const adminListUsers = `-- name: AdminListUsers :many
 
 
 SELECT
-  u.id, u.full_name, u.photo_url, u.email, u.hashed_password, u.password_changed_at, u.active, u.plan, u.daily_limit, u.last_login, u.is_verified, u.created_at, u.updated_at, u.role, u.deleted_at,
+  u.id, u.full_name, u.photo_url, u.email, u.hashed_password, u.password_changed_at, u.active, u.plan, u.daily_limit, u.last_login, u.is_verified, u.created_at, u.updated_at, u.role, u.deleted_at, u.kind,
   COUNT(d.id) FILTER (WHERE d.deleted_at IS NULL)::bigint AS downloads_total,
   COALESCE(SUM(d.file_size_bytes) FILTER (
     WHERE d.deleted_at IS NULL AND d.status = 'COMPLETED'
@@ -469,6 +476,11 @@ SELECT
 FROM users u
 LEFT JOIN downloads d ON d.user_id = u.id
 WHERE u.deleted_at IS NULL
+  -- Contas de SERVIÇO ficam fora: elas são gerenciadas pela seção de
+  -- integrações, e não por esta tela. Listá-las aqui ofereceria ao
+  -- administrador botões que não valem para elas (redefinir senha,
+  -- promover a admin) e misturaria sistemas com pessoas na contagem.
+  AND u.kind = 'human'
   AND (
     $3::text IS NULL
     OR lower(u.full_name) LIKE '%' || lower($3::text) || '%'
@@ -507,6 +519,7 @@ type AdminListUsersRow struct {
 	UpdatedAt         *time.Time         `json:"updated_at"`
 	Role              CoreUserRole       `json:"role"`
 	DeletedAt         pgtype.Timestamptz `json:"deleted_at"`
+	Kind              CoreUserKind       `json:"kind"`
 	DownloadsTotal    int64              `json:"downloads_total"`
 	StorageBytes      int64              `json:"storage_bytes"`
 }
@@ -553,6 +566,7 @@ func (q *Queries) AdminListUsers(ctx context.Context, arg AdminListUsersParams) 
 			&i.UpdatedAt,
 			&i.Role,
 			&i.DeletedAt,
+			&i.Kind,
 			&i.DownloadsTotal,
 			&i.StorageBytes,
 		); err != nil {
@@ -730,7 +744,7 @@ SET
   updated_at = now()
 WHERE id = $1
   AND deleted_at IS NULL
-RETURNING id, full_name, photo_url, email, hashed_password, password_changed_at, active, plan, daily_limit, last_login, is_verified, created_at, updated_at, role, deleted_at
+RETURNING id, full_name, photo_url, email, hashed_password, password_changed_at, active, plan, daily_limit, last_login, is_verified, created_at, updated_at, role, deleted_at, kind
 `
 
 type AdminUpdateUserParams struct {
@@ -779,6 +793,7 @@ func (q *Queries) AdminUpdateUser(ctx context.Context, arg AdminUpdateUserParams
 		&i.UpdatedAt,
 		&i.Role,
 		&i.DeletedAt,
+		&i.Kind,
 	)
 	return i, err
 }

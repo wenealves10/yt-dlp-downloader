@@ -20,6 +20,11 @@ SELECT
 FROM users u
 LEFT JOIN downloads d ON d.user_id = u.id
 WHERE u.deleted_at IS NULL
+  -- Contas de SERVIÇO ficam fora: elas são gerenciadas pela seção de
+  -- integrações, e não por esta tela. Listá-las aqui ofereceria ao
+  -- administrador botões que não valem para elas (redefinir senha,
+  -- promover a admin) e misturaria sistemas com pessoas na contagem.
+  AND u.kind = 'human'
   AND (
     sqlc.narg('search')::text IS NULL
     OR lower(u.full_name) LIKE '%' || lower(sqlc.narg('search')::text) || '%'
@@ -35,6 +40,11 @@ LIMIT $1 OFFSET $2;
 -- name: AdminCountUsers :one
 SELECT COUNT(*) FROM users u
 WHERE u.deleted_at IS NULL
+  -- Contas de SERVIÇO ficam fora: elas são gerenciadas pela seção de
+  -- integrações, e não por esta tela. Listá-las aqui ofereceria ao
+  -- administrador botões que não valem para elas (redefinir senha,
+  -- promover a admin) e misturaria sistemas com pessoas na contagem.
+  AND u.kind = 'human'
   AND (
     sqlc.narg('search')::text IS NULL
     OR lower(u.full_name) LIKE '%' || lower(sqlc.narg('search')::text) || '%'

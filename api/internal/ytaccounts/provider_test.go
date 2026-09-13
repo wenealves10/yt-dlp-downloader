@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -242,4 +243,49 @@ func TestReportAuthFailureSemLeaseNaoFazNada(t *testing.T) {
 	if falso.marcada {
 		t.Error("sem conta emprestada não há o que marcar")
 	}
+}
+
+// Exportar cookies pode subir um Chrome headless sobre o perfil, e a resolução
+// de metadados roda dentro da requisição de quem colou o link. Sem o cache,
+// todo link pagaria esse custo de novo.
+func TestJarEhReaproveitadoDentroDaJanela(t *testing.T) {
+	manager := NewManager(nil, nil)
+	conta := uuid.New()
+
+	manager.guardarJar(conta, []byte("# jar"))
+
+	jar, ok := manager.jarEmCache(conta)
+	require.True(t, ok, "o jar recém-guardado deveria valer")
+	require.Equal(t, []byte("# jar"), jar)
+}
+
+// Uma sessão recusada não pode continuar sendo servida do cache: a tentativa
+// seguinte repetiria a mesma falha até a janela vencer sozinha.
+func TestJarRecusadoSaiDoCache(t *testing.T) {
+	manager := NewManager(nil, nil)
+	conta := uuid.New()
+
+	manager.guardarJar(conta, []byte("# jar"))
+	manager.esquecerJar(conta)
+
+	_, ok := manager.jarEmCache(conta)
+	require.False(t, ok, "o jar de uma conta recusada precisa sair do cache")
+}
+
+// Jar vencido não é entregue, e some do mapa na próxima gravação: cookie é
+// segredo e não pode ficar em memória além da janela.
+func TestJarVencidoNaoEhEntregueNemFicaEmMemoria(t *testing.T) {
+	manager := NewManager(nil, nil)
+	vencida := uuid.New()
+
+	manager.cache[vencida] = jarEmCache{
+		dados:     []byte("# jar velho"),
+		validoAte: time.Now().Add(-time.Minute),
+	}
+
+	_, ok := manager.jarEmCache(vencida)
+	require.False(t, ok, "um jar vencido não pode ser reaproveitado")
+
+	manager.guardarJar(uuid.New(), []byte("# jar novo"))
+	require.NotContains(t, manager.cache, vencida, "a entrada vencida deveria ter sido varrida")
 }

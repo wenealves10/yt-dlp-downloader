@@ -131,6 +131,16 @@ func (s *Server) login(ctx *gin.Context) {
 		return
 	}
 
+	// Conta de integração não tem login. A recusa vem ANTES da comparação de
+	// senha porque não há senha a comparar: o hash guardado é deliberadamente
+	// inválido, e deixar o fluxo seguir produziria um erro de bcrypt em vez de
+	// uma resposta que explica o que está errado.
+	if user.Kind == db.CoreUserKindService {
+		ctx.JSON(http.StatusForbidden, errorResponse(
+			errors.New("esta conta é de integração e autentica apenas por chave de API")))
+		return
+	}
+
 	err = utils.CheckPassword(req.Password, user.HashedPassword)
 	if err != nil {
 		ctx.JSON(http.StatusUnauthorized, errorResponse(err))

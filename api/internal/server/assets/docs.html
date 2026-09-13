@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>adVideo — API de Integrações</title>
+    <link rel="icon" href="data:," />
+    <style>
+      :root {
+        color-scheme: light dark;
+      }
+      body {
+        margin: 0;
+        font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      /* Mostrado só se o visualizador não carregar: sem isto, uma CDN fora do
+         ar deixaria a página em branco e a impressão seria de API sem
+         documentação, quando a especificação está a um clique. */
+      #fallback {
+        max-width: 46rem;
+        margin: 4rem auto;
+        padding: 0 1.25rem;
+      }
+      #fallback h1 {
+        font-size: 1.4rem;
+      }
+      #fallback code {
+        background: rgba(127, 127, 127, 0.18);
+        padding: 0.15em 0.4em;
+        border-radius: 4px;
+      }
+      #fallback a {
+        color: #dc2626;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="fallback">
+      <h1>adVideo — API de Integrações</h1>
+      <p>
+        O visualizador interativo não pôde ser carregado (sem acesso à CDN, por
+        exemplo). A especificação completa continua disponível:
+      </p>
+      <p>
+        <a href="/openapi.yaml"><code>GET /openapi.yaml</code></a> — OpenAPI
+        3.1, legível por Insomnia, Postman, Bruno, Swagger UI e geradores de
+        cliente.
+      </p>
+      <p>
+        O guia narrativo, com exemplos de ponta a ponta e verificação de
+        assinatura de webhook, está em <code>docs/api-integracoes.md</code> no
+        repositório.
+      </p>
+    </div>
+
+    <script
+      id="api-reference"
+      data-url="/openapi.yaml"
+      data-configuration='{"theme":"purple","hideDownloadButton":false}'
+    ></script>
+    <script>
+      // O visualizador só substitui a página quando de fato carrega.
+      document.currentScript.addEventListener?.("load", function () {
+        const fallback = document.getElementById("fallback");
+        if (fallback) fallback.remove();
+      });
+    </script>
+    <script
+      src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"
+      onload="document.getElementById('fallback')?.remove()"
+    ></script>
+  </body>
+</html>

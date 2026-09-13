@@ -1,0 +1,1216 @@
+openapi: 3.1.0
+
+info:
+  title: adVideo — API de Integrações
+  version: "1.0.0"
+  summary: Download de mídia de várias plataformas, consumido por outro sistema.
+  description: |
+    Esta é a API que **outros sistemas** usam para pedir downloads à plataforma.
+    É a mesma engrenagem que atende a interface web — mesma fila, mesmos
+    provedores, mesmo armazenamento —, com autenticação por chave de API em vez
+    de login, e com cota, limites e auditoria por integração.
+
+    ## Como funciona, em uma frase
+
+    Você faz `POST /v1/integration/downloads` com uma URL, recebe `202` com um
+    identificador, e nós avisamos o seu sistema por **webhook** quando o arquivo
+    fica pronto. Enquanto isso, `GET /v1/integration/downloads/{id}` responde o
+    estado atual a qualquer momento.
+
+    ## Autenticação
+
+    Toda chamada exige a chave de API emitida no painel:
+
+    ```
+    Authorization: Bearer adk_live_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    ```
+
+    Se o seu ambiente reescreve o header `Authorization` (proxies corporativos
+    às vezes fazem isso), use `X-API-Key` com o mesmo valor.
+
+    Opcionalmente, envie também `X-Integration-Id` com o identificador público
+    da integração. Ele não substitui a chave: serve como trava contra o acidente
+    de apontar a chave de homologação para a integração de produção — se os dois
+    não corresponderem, a chamada é recusada com `integration_mismatch`.
+
+    **A chave aparece uma única vez**, na resposta que a criou. O banco guarda
+    apenas o hash dela; não existe rota que a devolva. Se for perdida, emita
+    outra no painel.
+
+    ## Ciclo de vida de um download
+
+    ```
+    PENDING ──> PROCESSING ──> COMPLETED ──> (EXPIRED após a validade)
+       │             │
+       │             └──> FAILED
+       └──> CANCELED (a seu pedido, em qualquer ponto antes do fim)
+    ```
+
+    O arquivo fica disponível por tempo limitado. `expires_at` diz até quando, e
+    depois disso o status vira `EXPIRED` e o arquivo é removido do
+    armazenamento — peça o download de novo se precisar dele outra vez.
+
+    ## Erros
+
+    Toda resposta de erro tem a mesma forma:
+
+    ```json
+    { "error": "cota diária de downloads esgotada", "code": "quota_exceeded" }
+    ```
+
+    Trate `code`, nunca `error`: a mensagem é para o humano que lê o log e pode
+    ser reescrita a qualquer momento; o código é contrato. A lista completa está
+    no schema `ErrorCode`.
+
+    ## Limites
+
+    Três controles independentes protegem a plataforma, e cada um tem uma reação
+    diferente do seu lado:
+
+    | Controle | Erro | O que fazer |
+    |---|---|---|
+    | Chamadas por minuto | `rate_limited` (429) | Respeitar `Retry-After` e continuar |
+    | Cota diária de downloads | `quota_exceeded` (429) | Agendar para depois de `X-Quota-Reset` |
+    | Downloads simultâneos | `too_many_concurrent` (429) | Esperar os atuais terminarem (~30 s) |
+
+    Os headers `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-Quota-Limit`,
+    `X-Quota-Remaining` e `X-Quota-Reset` acompanham as respostas e permitem
+    acompanhar o consumo sem chamar `GET /quota`.
+
+    A cota diária reseta à **meia-noite no fuso America/Sao_Paulo**.
+
+    ## Origem das chamadas
+
+    Se a integração tiver lista de IPs autorizados configurada, chamadas de
+    outros endereços são recusadas com `ip_not_allowed` (403) — e ficam
+    registradas na auditoria, com IP e horário. A lista atual pode ser
+    consultada em `GET /me`.
+
+  contact:
+    name: Suporte adVideo
+  license:
+    name: Proprietária
+
+servers:
+  - url: https://api.advideo.com.br
+    description: Produção
+  - url: http://localhost:8080
+    description: Desenvolvimento local
+
+security:
+  - ChaveDeAPI: []
+
+tags:
+  - name: Integração
+    description: Identidade da chave e consumo de cota.
+  - name: Mídia
+    description: Consulta de metadados e formatos disponíveis, antes de baixar.
+  - name: Downloads
+    description: Criar, acompanhar, cancelar e obter o arquivo.
+  - name: Webhooks
+    description: Configuração das notificações e histórico de entregas.
+
+paths:
+  # -------------------------------------------------------------------------
+  /v1/integration/me:
+    get:
+      tags: [Integração]
+      summary: Quem esta chave representa
+      description: |
+        Primeira chamada de qualquer integração nova: confirma que a credencial
+        funciona, devolve o identificador público e mostra os limites em vigor.
+      operationId: obterIntegracao
+      responses:
+        "200":
+          description: Dados da integração autenticada.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  integration:
+                    $ref: "#/components/schemas/Integration"
+                  limits:
+                    $ref: "#/components/schemas/Limits"
+                  usage:
+                    $ref: "#/components/schemas/Quota"
+              example:
+                integration:
+                  id: 9f1c7a32-4b8e-4a1d-9c3f-2e5b7d8a1f04
+                  name: CRM Comercial
+                  active: true
+                  created_at: "2026-09-01T13:04:11Z"
+                limits:
+                  daily_downloads: 200
+                  max_concurrent_downloads: 5
+                  rate_limit_per_minute: 120
+                  max_file_size_bytes: 1073741824
+                  allowed_ips: ["203.0.113.10", "198.51.100.0/24"]
+                usage:
+                  daily_limit: 200
+                  daily_used: 37
+                  daily_remaining: 163
+                  unlimited: false
+                  downloads_active: 2
+                  concurrency_limit: 5
+                  resets_at: "2026-09-13T00:00:00-03:00"
+                  resets_at_timezone: America/Sao_Paulo
+        "401": { $ref: "#/components/responses/NaoAutenticado" }
+        "403": { $ref: "#/components/responses/Proibido" }
+        "429": { $ref: "#/components/responses/LimiteExcedido" }
+
+  # -------------------------------------------------------------------------
+  /v1/integration/quota:
+    get:
+      tags: [Integração]
+      summary: Consumo da cota diária
+      description: |
+        Resposta enxuta para consultar antes de disparar um lote. Chamar esta
+        rota não consome cota (consome apenas do limite por minuto).
+      operationId: obterCota
+      responses:
+        "200":
+          description: Consumo atual.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Quota" }
+        "401": { $ref: "#/components/responses/NaoAutenticado" }
+        "429": { $ref: "#/components/responses/LimiteExcedido" }
+
+  # -------------------------------------------------------------------------
+  /v1/integration/media/resolve:
+    post:
+      tags: [Mídia]
+      summary: Consultar metadados e formatos de uma URL
+      description: |
+        Identifica a plataforma e devolve título, duração, capa e a lista de
+        formatos disponíveis. **Não cria download e não consome cota diária.**
+
+        Use esta rota quando precisar escolher a qualidade: o `id` de cada
+        formato é o valor aceito em `format_id` na criação do download.
+
+        Os identificadores de formato **não são estáveis** entre duas consultas
+        do mesmo conteúdo — a plataforma os regenera. Resolva e crie o download
+        na mesma sequência; se o identificador tiver expirado no meio do
+        caminho, a criação cai automaticamente para a melhor qualidade
+        equivalente em vez de falhar.
+      operationId: resolverMidia
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url:
+                  type: string
+                  format: uri
+                  description: URL pública do conteúdo.
+                  examples: ["https://www.youtube.com/watch?v=dQw4w9WgXcQ"]
+      responses:
+        "200":
+          description: Metadados do conteúdo.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MediaMetadata" }
+        "400":
+          description: URL inválida ou ausente.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Plataforma não suportada ou conteúdo inexistente.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "422":
+          description: |
+            Conteúdo privado, restrito por região, ao vivo, ou que exige login
+            indisponível. Códigos: `content_private`, `geo_blocked`,
+            `live_content`, `auth_required`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/NaoAutenticado" }
+        "429": { $ref: "#/components/responses/LimiteExcedido" }
+        "503":
+          description: Mecanismo de download indisponível no momento.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  # -------------------------------------------------------------------------
+  /v1/integration/downloads:
+    post:
+      tags: [Downloads]
+      summary: Criar um download
+      description: |
+        Aceita o pedido e devolve `202` com o download em `PENDING` ou
+        `PROCESSING`. O arquivo **não existe ainda**: acompanhe por webhook ou
+        consultando `GET /v1/integration/downloads/{id}`.
+
+        Consome uma unidade da cota diária e um slot de simultaneidade.
+      operationId: criarDownload
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url:
+                  type: string
+                  format: uri
+                  description: URL pública do conteúdo.
+                kind:
+                  type: string
+                  enum: [video, audio]
+                  default: video
+                  description: |
+                    `video` entrega MP4; `audio` extrai a trilha e entrega MP3.
+                format_id:
+                  type: string
+                  description: |
+                    Formato escolhido, vindo de `/media/resolve`. Omitido, usa a
+                    melhor qualidade disponível do tipo pedido.
+                  examples: ["137"]
+            examples:
+              melhorQualidade:
+                summary: Vídeo na melhor qualidade
+                value: { url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ" }
+              somenteAudio:
+                summary: Só o áudio, em MP3
+                value:
+                  url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+                  kind: audio
+              qualidadeEscolhida:
+                summary: Qualidade específica vinda de /media/resolve
+                value:
+                  url: "https://vimeo.com/76979871"
+                  kind: video
+                  format_id: "http-1080p"
+      responses:
+        "202":
+          description: Pedido aceito e enfileirado.
+          headers:
+            X-Quota-Remaining:
+              schema: { type: integer }
+              description: Downloads restantes na cota de hoje.
+            X-Quota-Reset:
+              schema: { type: string, format: date-time }
+              description: Quando a cota reseta.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  download: { $ref: "#/components/schemas/Download" }
+        "400":
+          description: |
+            Pedido inválido, URL não aceita, ou arquivo acima do limite da
+            integração. Códigos: `invalid_request`, `invalid_url`,
+            `format_unavailable`, `file_too_large`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/NaoAutenticado" }
+        "403": { $ref: "#/components/responses/Proibido" }
+        "404":
+          description: Plataforma não suportada ou conteúdo inexistente.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "422":
+          description: Conteúdo indisponível para download (privado, ao vivo, restrito).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "429":
+          description: |
+            Um dos três limites. Distinga pelo `code`: `rate_limited` (chamadas
+            por minuto), `quota_exceeded` (cota diária) ou `too_many_concurrent`
+            (downloads em andamento).
+          headers:
+            Retry-After:
+              schema: { type: integer }
+              description: Segundos a aguardar. Ausente em `quota_exceeded`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              examples:
+                cota:
+                  value: { error: "cota diária de downloads esgotada", code: quota_exceeded }
+                simultaneos:
+                  value:
+                    error: "limite de downloads simultâneos atingido; aguarde a conclusão dos atuais"
+                    code: too_many_concurrent
+        "503":
+          description: Mecanismo de download indisponível no momento.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+    get:
+      tags: [Downloads]
+      summary: Listar downloads
+      description: |
+        Lista, do mais recente para o mais antigo, apenas os downloads desta
+        integração.
+
+        É também a rede de segurança do webhook: se o seu endpoint ficou fora do
+        ar, `?status=COMPLETED` recupera o que você não recebeu.
+      operationId: listarDownloads
+      parameters:
+        - { $ref: "#/components/parameters/Pagina" }
+        - { $ref: "#/components/parameters/PorPagina" }
+        - name: status
+          in: query
+          description: Filtra por situação. Maiúsculas, exatamente como no enum.
+          schema: { $ref: "#/components/schemas/DownloadStatus" }
+        - name: platform
+          in: query
+          description: Filtra por plataforma de origem.
+          schema: { type: string, examples: ["youtube"] }
+        - name: search
+          in: query
+          description: Busca no título e na URL original.
+          schema: { type: string }
+      responses:
+        "200":
+          description: Página de downloads.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  downloads:
+                    type: array
+                    items: { $ref: "#/components/schemas/Download" }
+                  pagination: { $ref: "#/components/schemas/Pagination" }
+        "400":
+          description: Filtro inválido (por exemplo, `status` fora do enum).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/NaoAutenticado" }
+        "429": { $ref: "#/components/responses/LimiteExcedido" }
+
+  # -------------------------------------------------------------------------
+  /v1/integration/downloads/{id}:
+    parameters:
+      - { $ref: "#/components/parameters/DownloadID" }
+
+    get:
+      tags: [Downloads]
+      summary: Consultar um download
+      description: |
+        Estado atual do download. É a alternativa oficial ao webhook para quem
+        não pode expor um endpoint público.
+
+        Consultando em laço, respeite o limite por minuto: um intervalo de 5 a
+        10 segundos por download em andamento é suficiente, já que o progresso
+        muda nessa ordem de tempo.
+      operationId: obterDownload
+      responses:
+        "200":
+          description: O download.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  download: { $ref: "#/components/schemas/Download" }
+        "401": { $ref: "#/components/responses/NaoAutenticado" }
+        "404": { $ref: "#/components/responses/NaoEncontrado" }
+        "429": { $ref: "#/components/responses/LimiteExcedido" }
+
+    delete:
+      tags: [Downloads]
+      summary: Remover um download
+      description: |
+        Remove o download do histórico e apaga o arquivo do armazenamento. Não
+        devolve a unidade de cota consumida — a cota conta pedidos feitos no
+        dia, não arquivos guardados.
+      operationId: removerDownload
+      responses:
+        "204": { description: Removido. }
+        "401": { $ref: "#/components/responses/NaoAutenticado" }
+        "404": { $ref: "#/components/responses/NaoEncontrado" }
+        "429": { $ref: "#/components/responses/LimiteExcedido" }
+
+  # -------------------------------------------------------------------------
+  /v1/integration/downloads/{id}/cancel:
+    parameters:
+      - { $ref: "#/components/parameters/DownloadID" }
+    post:
+      tags: [Downloads]
+      summary: Cancelar um download
+      description: |
+        Interrompe um download em andamento. O processo que está baixando é
+        avisado e para em poucos segundos.
+
+        **É idempotente.** Cancelar algo que acabou de terminar sozinho não é
+        erro: a resposta devolve o status que de fato vigora, e pode ser
+        `COMPLETED`. Verifique o `status` da resposta em vez de assumir
+        `CANCELED`.
+      operationId: cancelarDownload
+      responses:
+        "200":
+          description: Pedido registrado; o download traz o status vigente.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  download: { $ref: "#/components/schemas/Download" }
+        "401": { $ref: "#/components/responses/NaoAutenticado" }
+        "404": { $ref: "#/components/responses/NaoEncontrado" }
+        "429": { $ref: "#/components/responses/LimiteExcedido" }
+
+  # -------------------------------------------------------------------------
+  /v1/integration/downloads/{id}/download-url:
+    parameters:
+      - { $ref: "#/components/parameters/DownloadID" }
+    get:
+      tags: [Downloads]
+      summary: Obter URL temporária do arquivo
+      description: |
+        Devolve uma URL assinada, **válida por 1 minuto**, apontando direto para
+        o armazenamento. É a forma recomendada de buscar o arquivo: os bytes não
+        passam pela API, então não há limite de tamanho nem timeout de
+        requisição no caminho.
+
+        Não guarde essa URL: ela expira. Guarde o `id` do download e peça uma
+        nova quando precisar.
+      operationId: obterURLDoArquivo
+      responses:
+        "200":
+          description: URL assinada.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url: { type: string, format: uri }
+                  expires_at: { type: string, format: date-time }
+        "401": { $ref: "#/components/responses/NaoAutenticado" }
+        "404": { $ref: "#/components/responses/NaoEncontrado" }
+        "409":
+          description: O download ainda não terminou (`download_not_ready`).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "410":
+          description: O arquivo expirou e foi removido (`download_expired`).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "429": { $ref: "#/components/responses/LimiteExcedido" }
+
+  # -------------------------------------------------------------------------
+  /v1/integration/downloads/{id}/file:
+    parameters:
+      - { $ref: "#/components/parameters/DownloadID" }
+    get:
+      tags: [Downloads]
+      summary: Baixar o arquivo pela API
+      description: |
+        Entrega os bytes do arquivo pela própria API, com
+        `Content-Disposition: attachment`.
+
+        Prefira `/download-url` quando possível: aqui os bytes atravessam a API,
+        o que consome banda do servidor e fica sujeito ao timeout do seu cliente
+        HTTP em arquivos grandes. Esta rota existe para ambientes que não podem
+        alcançar o armazenamento diretamente.
+      operationId: baixarArquivo
+      responses:
+        "200":
+          description: O arquivo.
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        "401": { $ref: "#/components/responses/NaoAutenticado" }
+        "404": { $ref: "#/components/responses/NaoEncontrado" }
+        "409":
+          description: O download ainda não terminou (`download_not_ready`).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "410":
+          description: O arquivo expirou e foi removido (`download_expired`).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "429": { $ref: "#/components/responses/LimiteExcedido" }
+
+  # -------------------------------------------------------------------------
+  /v1/integration/webhooks:
+    get:
+      tags: [Webhooks]
+      summary: Listar webhooks configurados
+      description: |
+        Mostra os endpoints cadastrados, os eventos assinados e o diagnóstico da
+        última entrega.
+
+        O **segredo de assinatura não é devolvido aqui**, por decisão de
+        segurança: ele é entregue pelo painel a uma pessoa. Se ele saísse por
+        uma rota autenticada pela chave de API, um vazamento de chave viraria
+        também um vazamento do segredo — e com ele seria possível forjar eventos
+        assinados para o seu endpoint.
+
+        O cadastro e a rotação são feitos no painel, não por esta API.
+      operationId: listarWebhooks
+      responses:
+        "200":
+          description: Webhooks da integração.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  webhooks:
+                    type: array
+                    items: { $ref: "#/components/schemas/Webhook" }
+        "401": { $ref: "#/components/responses/NaoAutenticado" }
+        "429": { $ref: "#/components/responses/LimiteExcedido" }
+
+  # -------------------------------------------------------------------------
+  /v1/integration/webhooks/{webhookId}/test:
+    parameters:
+      - name: webhookId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      tags: [Webhooks]
+      summary: Disparar evento de teste
+      description: |
+        Enfileira um evento `ping` para o endpoint cadastrado. Serve para
+        validar a verificação de assinatura do seu lado sem esperar um download
+        real.
+
+        Responde `202` porque o POST no seu endpoint acontece em segundo plano;
+        o resultado aparece em `GET /v1/integration/deliveries`.
+      operationId: testarWebhook
+      responses:
+        "202":
+          description: Teste enfileirado.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+        "401": { $ref: "#/components/responses/NaoAutenticado" }
+        "404": { $ref: "#/components/responses/NaoEncontrado" }
+        "429": { $ref: "#/components/responses/LimiteExcedido" }
+
+  # -------------------------------------------------------------------------
+  /v1/integration/deliveries:
+    get:
+      tags: [Webhooks]
+      summary: Histórico de entregas de webhook
+      description: |
+        O que foi enviado, quando, quantas tentativas, e o que o seu endpoint
+        respondeu — incluindo o corpo exato de cada notificação.
+
+        Existe para encerrar a discussão mais comum de qualquer integração por
+        webhook ("vocês enviaram?" / "não recebi") com um registro que as duas
+        partes podem consultar.
+      operationId: listarEntregas
+      parameters:
+        - { $ref: "#/components/parameters/Pagina" }
+        - { $ref: "#/components/parameters/PorPagina" }
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [PENDING, DELIVERED, FAILED]
+        - name: event_type
+          in: query
+          schema: { $ref: "#/components/schemas/EventType" }
+        - name: download_id
+          in: query
+          description: Todas as notificações de um download específico.
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Página de entregas.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deliveries:
+                    type: array
+                    items: { $ref: "#/components/schemas/Delivery" }
+                  pagination: { $ref: "#/components/schemas/Pagination" }
+        "400":
+          description: Filtro inválido.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/NaoAutenticado" }
+        "429": { $ref: "#/components/responses/LimiteExcedido" }
+
+# ---------------------------------------------------------------------------
+# O que NÓS enviamos para VOCÊ
+# ---------------------------------------------------------------------------
+webhooks:
+  eventoDeDownload:
+    post:
+      tags: [Webhooks]
+      summary: Notificação enviada ao seu endpoint
+      description: |
+        Enviamos `POST` com `Content-Type: application/json` para a URL
+        cadastrada no painel, a cada transição de estado dos downloads da sua
+        integração.
+
+        ## Headers
+
+        | Header | Conteúdo |
+        |---|---|
+        | `X-Advideo-Event` | Tipo do evento (`download.completed`, …) |
+        | `X-Advideo-Delivery` | Identificador desta entrega (use para idempotência) |
+        | `X-Advideo-Timestamp` | Unix em segundos, usado na assinatura |
+        | `X-Advideo-Signature` | `v1=<hmac-sha256 em hexadecimal>` |
+        | `X-Advideo-Attempt` | Número da tentativa, a partir de 1 |
+
+        ## Verificação da assinatura — obrigatória
+
+        Assinamos `"<timestamp>.<corpo cru>"` com HMAC-SHA256 usando o segredo
+        do webhook. Verifique **antes** de processar, sobre o corpo **cru** (não
+        sobre o JSON reserializado — reserializar muda bytes e invalida a
+        assinatura):
+
+        ```js
+        const crypto = require("crypto");
+
+        function verificar(req, segredo) {
+          const ts = req.header("X-Advideo-Timestamp");
+          const assinatura = req.header("X-Advideo-Signature");
+
+          // Recusa o que for antigo demais: sem isto, uma entrega capturada
+          // hoje pode ser reenviada amanhã com a assinatura ainda válida.
+          if (Math.abs(Date.now() / 1000 - Number(ts)) > 300) return false;
+
+          const esperada = "v1=" + crypto
+            .createHmac("sha256", segredo)
+            .update(ts + "." + req.rawBody)
+            .digest("hex");
+
+          // Comparação em tempo constante: um === vazaria, pelo tempo de
+          // resposta, quantos bytes o atacante já acertou.
+          return crypto.timingSafeEqual(
+            Buffer.from(esperada), Buffer.from(assinatura)
+          );
+        }
+        ```
+
+        ## Como responder
+
+        Responda **2xx** (200, 202 e 204 servem) o mais rápido possível, e
+        processe depois. Timeout de 20 segundos por tentativa.
+
+        - Erro de rede, timeout, `5xx`, `408` ou `429`: reenviamos, com espera
+          crescente, até 8 tentativas.
+        - Outros `4xx`: entendemos como recusa e não reenviamos — o mesmo corpo
+          produziria a mesma recusa. O contador de falhas do painel registra.
+        - `410 Gone`: paramos e desativamos o webhook. É como você desliga a
+          notificação pelo próprio endpoint.
+
+        Após 30 falhas consecutivas, o webhook é desativado automaticamente e o
+        motivo aparece no painel.
+
+        ## Ordem e duplicidade
+
+        **Não garantimos ordem nem entrega única.** Reenvios existem, e um
+        evento mais novo pode chegar antes de um mais velho. Duas defesas do seu
+        lado resolvem:
+
+        1. guarde `X-Advideo-Delivery` e ignore o que já processou;
+        2. compare o `status` recebido com o que você já tem, e ignore
+           retrocessos (`processing` chegando depois de `completed`).
+
+        Em caso de dúvida, `GET /v1/integration/downloads/{id}` é sempre a
+        verdade atual.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookEvent" }
+            examples:
+              concluido:
+                summary: download.completed
+                value:
+                  id: 7c9e6679-7425-40de-944b-e07fc1f90ae7
+                  type: download.completed
+                  created_at: "2026-09-12T18:44:02Z"
+                  integration_id: 9f1c7a32-4b8e-4a1d-9c3f-2e5b7d8a1f04
+                  data:
+                    download:
+                      id: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+                      status: COMPLETED
+                      title: "Palestra sobre sistemas distribuídos"
+                      original_url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+                      platform: youtube
+                      platform_label: YouTube
+                      format: MP4
+                      quality_label: "1080p"
+                      uploader: "Canal Exemplo"
+                      duration_seconds: 3120
+                      file_size_bytes: 284551168
+                      created_at: "2026-09-12T18:41:55Z"
+                      started_at: "2026-09-12T18:41:58Z"
+                      finished_at: "2026-09-12T18:44:01Z"
+                      expires_at: "2026-09-13T18:44:01Z"
+                      links:
+                        self: "https://api.advideo.com.br/v1/integration/downloads/3fa85f64-5717-4562-b3fc-2c963f66afa6"
+                        download_url: "https://api.advideo.com.br/v1/integration/downloads/3fa85f64-5717-4562-b3fc-2c963f66afa6/download-url"
+                        file: "https://api.advideo.com.br/v1/integration/downloads/3fa85f64-5717-4562-b3fc-2c963f66afa6/file"
+              falhou:
+                summary: download.failed
+                value:
+                  id: 1b4e28ba-2fa1-11d2-883f-0016d3cca427
+                  type: download.failed
+                  created_at: "2026-09-12T18:45:10Z"
+                  integration_id: 9f1c7a32-4b8e-4a1d-9c3f-2e5b7d8a1f04
+                  data:
+                    download:
+                      id: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+                      status: FAILED
+                      title: "Vídeo indisponível"
+                      original_url: "https://www.youtube.com/watch?v=xxxxxxxxxxx"
+                      platform: youtube
+                      format: MP4
+                      error_message: "Este conteúdo não está disponível"
+              progresso:
+                summary: download.progress (requer assinatura explícita)
+                value:
+                  id: 6ba7b810-9dad-11d1-80b4-00c04fd430c8
+                  type: download.progress
+                  created_at: "2026-09-12T18:42:30Z"
+                  integration_id: 9f1c7a32-4b8e-4a1d-9c3f-2e5b7d8a1f04
+                  data:
+                    download:
+                      id: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+                      status: PROCESSING
+                      title: "Palestra sobre sistemas distribuídos"
+                      original_url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+                      platform: youtube
+                      format: MP4
+                      progress:
+                        percent: 42.5
+                        downloaded_bytes: 120926208
+                        total_bytes: 284551168
+                        speed_bps: 5242880
+                        eta_seconds: 31
+                        postprocess: false
+      responses:
+        "2XX":
+          description: |
+            Recebido. Qualquer 2xx serve e encerra a entrega com sucesso.
+        "410":
+          description: |
+            Não quero mais receber. Desativamos o webhook e paramos de tentar.
+
+components:
+  securitySchemes:
+    ChaveDeAPI:
+      type: http
+      scheme: bearer
+      description: |
+        Chave de API emitida no painel, com o prefixo `adk_live_`.
+
+        Alternativa para ambientes que reescrevem `Authorization`: o header
+        `X-API-Key` com o mesmo valor.
+
+  parameters:
+    DownloadID:
+      name: id
+      in: path
+      required: true
+      description: Identificador do download.
+      schema: { type: string, format: uuid }
+
+    Pagina:
+      name: page
+      in: query
+      description: Página, a partir de 1.
+      schema: { type: integer, minimum: 1, default: 1 }
+
+    PorPagina:
+      name: perPage
+      in: query
+      description: Itens por página. Acima de 100 é limitado a 100.
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+
+  responses:
+    NaoAutenticado:
+      description: |
+        Credencial ausente, inválida, revogada ou expirada. Códigos:
+        `missing_credentials`, `invalid_api_key`, `key_revoked`, `key_expired`,
+        `integration_mismatch`.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: "chave de API inválida", code: invalid_api_key }
+
+    Proibido:
+      description: |
+        Credencial válida, acesso negado. `integration_disabled` (integração
+        desativada ou removida) ou `ip_not_allowed` (origem fora da lista de IPs
+        autorizados).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example:
+            error: "este endereço IP não está autorizado para esta integração"
+            code: ip_not_allowed
+
+    NaoEncontrado:
+      description: |
+        O recurso não existe **ou não pertence a esta integração** — as duas
+        situações respondem igual, de propósito: distinguir permitiria descobrir
+        os identificadores de outra integração por tentativa.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: "download não encontrado", code: not_found }
+
+    LimiteExcedido:
+      description: Um dos limites da integração foi atingido.
+      headers:
+        Retry-After:
+          schema: { type: integer }
+          description: Segundos a aguardar.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example:
+            error: "limite de chamadas por minuto excedido; aguarde 12s"
+            code: rate_limited
+
+  schemas:
+    ErrorCode:
+      type: string
+      description: |
+        Código estável do erro. **Trate isto, não a mensagem.**
+      enum:
+        - missing_credentials
+        - invalid_api_key
+        - key_revoked
+        - key_expired
+        - integration_mismatch
+        - integration_disabled
+        - ip_not_allowed
+        - rate_limited
+        - quota_exceeded
+        - too_many_concurrent
+        - file_too_large
+        - invalid_request
+        - not_found
+        - method_not_allowed
+        - download_not_ready
+        - download_expired
+        - internal_error
+        - service_unavailable
+        - invalid_url
+        - unsupported_platform
+        - content_unavailable
+        - content_private
+        - auth_required
+        - geo_blocked
+        - live_content
+        - format_unavailable
+        - unavailable
+        - timeout
+        - download_failed
+
+    Error:
+      type: object
+      required: [error, code]
+      properties:
+        error:
+          type: string
+          description: Mensagem em português, para o humano que lê o log.
+        code:
+          $ref: "#/components/schemas/ErrorCode"
+        limit:
+          type: integer
+          description: Presente em `file_too_large`, em bytes.
+        size:
+          type: integer
+          description: Presente em `file_too_large`, em bytes.
+
+    DownloadStatus:
+      type: string
+      description: |
+        - `PENDING` — na fila
+        - `PROCESSING` — baixando
+        - `COMPLETED` — pronto para buscar
+        - `FAILED` — falhou; veja `error_message`
+        - `CANCELED` — cancelado a seu pedido
+        - `EXPIRED` — a validade passou e o arquivo foi removido
+        - `RETRYING` — nova tentativa após falha passageira
+      enum: [PENDING, PROCESSING, COMPLETED, FAILED, CANCELED, EXPIRED, RETRYING]
+
+    EventType:
+      type: string
+      description: |
+        Tipos de evento. Um webhook sem lista explícita recebe todos os de ciclo
+        de vida; `download.progress` exige assinatura explícita, porque são
+        muitos eventos por download.
+      enum:
+        - download.queued
+        - download.started
+        - download.progress
+        - download.completed
+        - download.failed
+        - download.canceled
+        - download.expired
+        - download.retrying
+        - ping
+
+    Progress:
+      type: object
+      description: Andamento. Presente enquanto o download está em curso.
+      properties:
+        percent: { type: number, format: double, examples: [42.5] }
+        downloaded_bytes: { type: integer, format: int64 }
+        total_bytes:
+          type: integer
+          format: int64
+          description: Estimativa, corrigida conforme o download avança.
+        speed_bps: { type: integer, format: int64, description: Bytes por segundo. }
+        eta_seconds: { type: integer }
+        postprocess:
+          type: boolean
+          description: |
+            Verdadeiro quando os bytes já foram baixados e o arquivo está sendo
+            convertido ou as faixas estão sendo juntadas. O percentual pode
+            ficar em 100 nesta etapa.
+
+    DownloadLinks:
+      type: object
+      description: |
+        Rotas desta API para o download. As de arquivo só aparecem quando há
+        arquivo — em um download que falhou, elas estão ausentes.
+      properties:
+        self: { type: string, format: uri }
+        download_url: { type: string, format: uri }
+        file: { type: string, format: uri }
+
+    Download:
+      type: object
+      description: |
+        O download. **Este é exatamente o mesmo objeto que vai no corpo do
+        webhook**, em `data.download`: um parser serve para os dois.
+      required: [id, status, title, original_url, platform, format]
+      properties:
+        id: { type: string, format: uuid }
+        status: { $ref: "#/components/schemas/DownloadStatus" }
+        title: { type: string, description: Título vindo da plataforma. }
+        original_url: { type: string, format: uri }
+        platform:
+          type: string
+          description: Identificador da plataforma.
+          examples: ["youtube"]
+        platform_label:
+          type: string
+          description: Nome da plataforma para exibição.
+          examples: ["YouTube"]
+        format:
+          type: string
+          enum: [MP4, MP3, M4A, WEBM, FLAC, BEST]
+        quality_label:
+          type: string
+          description: Qualidade entregue, como mostrada ao usuário.
+          examples: ["1080p"]
+        uploader: { type: string, description: Autor ou canal. }
+        thumbnail_url: { type: string, format: uri }
+        duration_seconds: { type: integer }
+        file_size_bytes:
+          type: integer
+          format: int64
+          description: Tamanho real do arquivo. Só após a conclusão.
+        error_message:
+          type: string
+          description: |
+            Motivo da falha, em linguagem de usuário. O detalhe técnico não é
+            exposto: ele descreve a nossa infraestrutura.
+        created_at: { type: string, format: date-time }
+        started_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time }
+        expires_at:
+          type: string
+          format: date-time
+          description: Até quando o arquivo fica disponível.
+        progress: { $ref: "#/components/schemas/Progress" }
+        links: { $ref: "#/components/schemas/DownloadLinks" }
+
+    MediaFormat:
+      type: object
+      properties:
+        id:
+          type: string
+          description: |
+            Valor a enviar em `format_id`. **Não é estável** entre consultas.
+        label: { type: string, examples: ["1080p"] }
+        kind: { type: string, enum: [video, audio] }
+        ext: { type: string, examples: ["mp4"] }
+        height: { type: integer }
+        fps: { type: integer }
+        size_bytes: { type: integer, format: int64 }
+        size_approximate:
+          type: boolean
+          description: Verdadeiro quando a plataforma só informa uma estimativa.
+
+    MediaMetadata:
+      type: object
+      properties:
+        url: { type: string, format: uri, description: URL normalizada. }
+        platform: { type: string }
+        platform_label: { type: string }
+        content_id: { type: string }
+        title: { type: string }
+        description: { type: string }
+        thumbnail: { type: string, format: uri }
+        duration: { type: integer, description: Em segundos. }
+        uploader: { type: string }
+        uploader_url: { type: string, format: uri }
+        view_count: { type: integer, format: int64 }
+        like_count: { type: integer, format: int64 }
+        upload_date: { type: string }
+        webpage_url: { type: string, format: uri }
+        formats:
+          type: array
+          items: { $ref: "#/components/schemas/MediaFormat" }
+
+    Integration:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Identificador público. Pode ir em `X-Integration-Id`.
+        name: { type: string }
+        description: { type: string }
+        active: { type: boolean }
+        created_at: { type: string, format: date-time }
+
+    Limits:
+      type: object
+      properties:
+        daily_downloads:
+          type: integer
+          description: Downloads por dia. Zero significa sem teto.
+        max_concurrent_downloads:
+          type: integer
+          description: Downloads em andamento ao mesmo tempo.
+        rate_limit_per_minute:
+          type: integer
+          description: Chamadas por minuto, por chave de API.
+        max_file_size_bytes:
+          type: integer
+          format: int64
+          description: Tamanho máximo por arquivo. Zero significa sem teto.
+        allowed_ips:
+          type: array
+          description: |
+            IPs e CIDRs autorizados. Lista vazia aceita qualquer origem.
+          items: { type: string }
+
+    Quota:
+      type: object
+      properties:
+        daily_limit: { type: integer }
+        daily_used: { type: integer }
+        daily_remaining: { type: integer }
+        unlimited: { type: boolean }
+        downloads_active: { type: integer }
+        concurrency_limit: { type: integer }
+        resets_at:
+          type: string
+          format: date-time
+          description: Próxima virada da cota.
+        resets_at_timezone:
+          type: string
+          examples: ["America/Sao_Paulo"]
+
+    Webhook:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        url: { type: string, format: uri }
+        events:
+          type: array
+          description: Eventos efetivamente assinados.
+          items: { $ref: "#/components/schemas/EventType" }
+        include_progress: { type: boolean }
+        active: { type: boolean }
+        last_delivery_at: { type: string, format: date-time }
+        last_status_code: { type: integer }
+        consecutive_failures:
+          type: integer
+          description: |
+            Falhas seguidas. Em 30, o webhook é desativado automaticamente.
+        disabled_reason: { type: string }
+        created_at: { type: string, format: date-time }
+
+    Delivery:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: |
+            O mesmo valor enviado no header `X-Advideo-Delivery`.
+        webhook_id: { type: string, format: uuid }
+        webhook_url: { type: string, format: uri }
+        event_type: { $ref: "#/components/schemas/EventType" }
+        download_id: { type: string, format: uuid }
+        status: { type: string, enum: [PENDING, DELIVERED, FAILED] }
+        attempts: { type: integer }
+        last_status_code:
+          type: integer
+          description: Status HTTP que o seu endpoint respondeu.
+        last_error: { type: string }
+        duration_ms: { type: integer }
+        payload:
+          $ref: "#/components/schemas/WebhookEvent"
+        created_at: { type: string, format: date-time }
+        delivered_at: { type: string, format: date-time }
+
+    WebhookEvent:
+      type: object
+      description: Corpo da notificação enviada ao seu endpoint.
+      required: [id, type, created_at, integration_id, data]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: |
+            Identificador desta entrega, igual ao header `X-Advideo-Delivery`.
+            Guarde-o para descartar reenvios.
+        type: { $ref: "#/components/schemas/EventType" }
+        created_at: { type: string, format: date-time }
+        integration_id: { type: string, format: uuid }
+        data:
+          type: object
+          properties:
+            download: { $ref: "#/components/schemas/Download" }
+            message:
+              type: string
+              description: Presente apenas no evento `ping`.
+
+    Pagination:
+      type: object
+      properties:
+        page: { type: integer }
+        per_page: { type: integer }
+        total: { type: integer }
+        next_page: { type: boolean, description: Há página seguinte. }
+        prev_page: { type: boolean, description: Há página anterior. }

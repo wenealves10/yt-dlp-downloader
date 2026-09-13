@@ -149,6 +149,48 @@ func (ns NullCorePlanType) Value() (driver.Value, error) {
 	return string(ns.CorePlanType), nil
 }
 
+type CoreUserKind string
+
+const (
+	CoreUserKindHuman   CoreUserKind = "human"
+	CoreUserKindService CoreUserKind = "service"
+)
+
+func (e *CoreUserKind) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = CoreUserKind(s)
+	case string:
+		*e = CoreUserKind(s)
+	default:
+		return fmt.Errorf("unsupported scan type for CoreUserKind: %T", src)
+	}
+	return nil
+}
+
+type NullCoreUserKind struct {
+	CoreUserKind CoreUserKind `json:"core_user_kind"`
+	Valid        bool         `json:"valid"` // Valid is true if CoreUserKind is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullCoreUserKind) Scan(value interface{}) error {
+	if value == nil {
+		ns.CoreUserKind, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.CoreUserKind.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullCoreUserKind) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.CoreUserKind), nil
+}
+
 type CoreUserRole string
 
 const (
@@ -190,6 +232,49 @@ func (ns NullCoreUserRole) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.CoreUserRole), nil
+}
+
+type CoreWebhookDeliveryStatus string
+
+const (
+	CoreWebhookDeliveryStatusPENDING   CoreWebhookDeliveryStatus = "PENDING"
+	CoreWebhookDeliveryStatusDELIVERED CoreWebhookDeliveryStatus = "DELIVERED"
+	CoreWebhookDeliveryStatusFAILED    CoreWebhookDeliveryStatus = "FAILED"
+)
+
+func (e *CoreWebhookDeliveryStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = CoreWebhookDeliveryStatus(s)
+	case string:
+		*e = CoreWebhookDeliveryStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for CoreWebhookDeliveryStatus: %T", src)
+	}
+	return nil
+}
+
+type NullCoreWebhookDeliveryStatus struct {
+	CoreWebhookDeliveryStatus CoreWebhookDeliveryStatus `json:"core_webhook_delivery_status"`
+	Valid                     bool                      `json:"valid"` // Valid is true if CoreWebhookDeliveryStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullCoreWebhookDeliveryStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.CoreWebhookDeliveryStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.CoreWebhookDeliveryStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullCoreWebhookDeliveryStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.CoreWebhookDeliveryStatus), nil
 }
 
 type CoreYoutubeAccountStatus string
@@ -269,6 +354,89 @@ type Download struct {
 	ErrorDetail     pgtype.Text        `json:"error_detail"`
 }
 
+type Integration struct {
+	ID                     uuid.UUID          `json:"id"`
+	UserID                 uuid.UUID          `json:"user_id"`
+	Name                   string             `json:"name"`
+	Description            pgtype.Text        `json:"description"`
+	CallbackBaseUrl        pgtype.Text        `json:"callback_base_url"`
+	DailyLimit             int32              `json:"daily_limit"`
+	MaxFileSizeBytes       int64              `json:"max_file_size_bytes"`
+	RateLimitPerMinute     int32              `json:"rate_limit_per_minute"`
+	MaxConcurrentDownloads int32              `json:"max_concurrent_downloads"`
+	AllowedIps             []string           `json:"allowed_ips"`
+	Active                 bool               `json:"active"`
+	CreatedBy              pgtype.UUID        `json:"created_by"`
+	CreatedAt              *time.Time         `json:"created_at"`
+	UpdatedAt              *time.Time         `json:"updated_at"`
+	DeletedAt              pgtype.Timestamptz `json:"deleted_at"`
+}
+
+type IntegrationApiKey struct {
+	ID            uuid.UUID          `json:"id"`
+	IntegrationID uuid.UUID          `json:"integration_id"`
+	Label         string             `json:"label"`
+	KeyPrefix     string             `json:"key_prefix"`
+	KeyHash       string             `json:"key_hash"`
+	LastFour      string             `json:"last_four"`
+	RevokedAt     pgtype.Timestamptz `json:"revoked_at"`
+	RevokedReason pgtype.Text        `json:"revoked_reason"`
+	ExpiresAt     pgtype.Timestamptz `json:"expires_at"`
+	LastUsedAt    pgtype.Timestamptz `json:"last_used_at"`
+	LastUsedIp    pgtype.Text        `json:"last_used_ip"`
+	CreatedBy     pgtype.UUID        `json:"created_by"`
+	CreatedAt     *time.Time         `json:"created_at"`
+}
+
+type IntegrationRequest struct {
+	ID            int64       `json:"id"`
+	IntegrationID uuid.UUID   `json:"integration_id"`
+	ApiKeyID      pgtype.UUID `json:"api_key_id"`
+	Method        string      `json:"method"`
+	Path          string      `json:"path"`
+	StatusCode    int32       `json:"status_code"`
+	Ip            string      `json:"ip"`
+	UserAgent     string      `json:"user_agent"`
+	DurationMs    int32       `json:"duration_ms"`
+	ErrorCode     pgtype.Text `json:"error_code"`
+	DownloadID    pgtype.UUID `json:"download_id"`
+	CreatedAt     *time.Time  `json:"created_at"`
+}
+
+type IntegrationWebhook struct {
+	ID                  uuid.UUID          `json:"id"`
+	IntegrationID       uuid.UUID          `json:"integration_id"`
+	Url                 string             `json:"url"`
+	Secret              string             `json:"secret"`
+	Events              []string           `json:"events"`
+	IncludeProgress     bool               `json:"include_progress"`
+	Active              bool               `json:"active"`
+	LastDeliveryAt      pgtype.Timestamptz `json:"last_delivery_at"`
+	LastStatusCode      pgtype.Int4        `json:"last_status_code"`
+	LastError           pgtype.Text        `json:"last_error"`
+	ConsecutiveFailures int32              `json:"consecutive_failures"`
+	DisabledReason      pgtype.Text        `json:"disabled_reason"`
+	CreatedAt           *time.Time         `json:"created_at"`
+	UpdatedAt           *time.Time         `json:"updated_at"`
+	DeletedAt           pgtype.Timestamptz `json:"deleted_at"`
+}
+
+type IntegrationWebhookDelivery struct {
+	ID             uuid.UUID                 `json:"id"`
+	WebhookID      uuid.UUID                 `json:"webhook_id"`
+	IntegrationID  uuid.UUID                 `json:"integration_id"`
+	EventType      string                    `json:"event_type"`
+	DownloadID     pgtype.UUID               `json:"download_id"`
+	Payload        []byte                    `json:"payload"`
+	Status         CoreWebhookDeliveryStatus `json:"status"`
+	Attempts       int32                     `json:"attempts"`
+	LastStatusCode pgtype.Int4               `json:"last_status_code"`
+	LastError      pgtype.Text               `json:"last_error"`
+	DurationMs     int32                     `json:"duration_ms"`
+	DeliveredAt    pgtype.Timestamptz        `json:"delivered_at"`
+	CreatedAt      *time.Time                `json:"created_at"`
+}
+
 type User struct {
 	ID                uuid.UUID          `json:"id"`
 	FullName          string             `json:"full_name"`
@@ -285,6 +453,7 @@ type User struct {
 	UpdatedAt         *time.Time         `json:"updated_at"`
 	Role              CoreUserRole       `json:"role"`
 	DeletedAt         pgtype.Timestamptz `json:"deleted_at"`
+	Kind              CoreUserKind       `json:"kind"`
 }
 
 type YoutubeAccount struct {

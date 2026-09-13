@@ -80,19 +80,6 @@ func main() {
 	sseManager := sse.NewSSEManager()
 
 	var chDownloads = make(chan string, 100)
-	go rdStream.Consume(ctx, chDownloads)
-
-	go func() {
-		for msg := range chDownloads {
-			var event stream.DownloadEvent
-			err := json.Unmarshal([]byte(msg), &event)
-			if err != nil {
-				log.Printf("Error unmarshalling SSE message: %v", err)
-				continue
-			}
-			sseManager.Publish(event.UserID, msg)
-		}
-	}()
 
 	// Integração com o serviço de navegador remoto. Quando não configurada, o
 	// cliente é nil e a aplicação segue funcionando sem contas gerenciadas.
@@ -113,6 +100,29 @@ func main() {
 	if err != nil {
 		log.Fatalf("cannot create server: %v", err)
 	}
+
+	// Este consumidor é o ÚNICO do stream de downloads, e agora atende dois
+	// destinos: a tela (SSE) e os sistemas integrados (webhook).
+	//
+	// Um segundo consumidor só para webhooks criaria um grupo concorrente no
+	// mesmo stream, e cada evento iria para um só dos dois — metade das
+	// atualizações deixaria de aparecer na tela.
+	//
+	// A ordem importa: o SSE primeiro. Ele é síncrono e é o que o usuário está
+	// olhando; o despachante apenas enfileira e devolve.
+	go func() {
+		for msg := range chDownloads {
+			var event stream.DownloadEvent
+			err := json.Unmarshal([]byte(msg), &event)
+			if err != nil {
+				log.Printf("Error unmarshalling SSE message: %v", err)
+				continue
+			}
+			sseManager.Publish(event.UserID, msg)
+			api.Dispatcher().Handle(event)
+		}
+	}()
+	go rdStream.Consume(ctx, chDownloads)
 
 	if err := api.Start(cg.ServerAddress); err != nil {
 		log.Fatalf("cannot start server: %v", err)

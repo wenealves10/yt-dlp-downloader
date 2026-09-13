@@ -16,6 +16,7 @@ import (
 	"github.com/wenealves10/yt-dlp-downloader/internal/browser"
 	"github.com/wenealves10/yt-dlp-downloader/internal/configs"
 	"github.com/wenealves10/yt-dlp-downloader/internal/db"
+	"github.com/wenealves10/yt-dlp-downloader/internal/integrations"
 	"github.com/wenealves10/yt-dlp-downloader/internal/jobs"
 	"github.com/wenealves10/yt-dlp-downloader/internal/libs/storage/r2"
 	"github.com/wenealves10/yt-dlp-downloader/internal/libs/stream"
@@ -103,6 +104,10 @@ func main() {
 				queues.TypeDownloadMediaQueue:      queues.QueueWeightDownloadMedia,
 				queues.TypeTempCleanupQueue:        queues.QueueWeightTempCleanup,
 				queues.TypeMediaHealthQueue:        queues.QueueWeightMediaHealth,
+				// A entrega de webhook tem fila própria: um endpoint lento de
+				// cliente não pode ocupar os slots que deveriam baixar vídeo.
+				queues.TypeIntegrationWebhookQueue: queues.QueueWeightIntegrationWebhook,
+				queues.TypeIntegrationPruneQueue:   queues.QueueWeightIntegrationPrune,
 			},
 		},
 	)
@@ -135,6 +140,14 @@ func main() {
 	mux.Handle(tasks.TypeDownloadExpiration, jobs.NewJobDownloadExpiration(asynqClient, store))
 	mux.Handle(tasks.TypeYoutubeHealthCheck, jobs.NewJobYoutubeHealthCheck(store, browserClient))
 	mux.Handle(tasks.TypeTempCleanup, jobs.NewJobTempCleanup(cg.MediaWorkDir))
+
+	// Notificações para os sistemas integrados. O entregador é montado uma vez
+	// e reaproveitado: ele carrega o pool de conexões e as travas de segurança
+	// da saída (sem redirecionamento, sem endereço interno, com timeout).
+	entregador := integrations.NewEntregador(cg.WebhookTimeout, cg.WebhookAllowPrivate)
+	mux.Handle(tasks.TypeIntegrationWebhook, jobs.NewJobWebhookDeliver(store, entregador))
+	mux.Handle(tasks.TypeIntegrationPrune,
+		jobs.NewJobIntegrationPrune(store, cg.IntegrationLogRetentionDays))
 
 	mux.Handle(tasks.TypeMediaHealth, saudeMidia)
 	log.Printf("Starting worker server on %s with a maximum of %d concurrent tasks", redisAddr, queues.WorkerConcurrency)
@@ -195,6 +208,18 @@ func startScheduledTasks(redisOpt asynq.RedisClientOpt, withYoutubeHealthCheck b
 		log.Fatalf("failed to create media health task: %v", err)
 	}
 	if _, err := scheduler.Register("@every 5m", saudeTask, asynq.Queue(queues.TypeMediaHealthQueue)); err != nil {
+		log.Fatal(err)
+	}
+
+	// Poda da auditoria das integrações. De madrugada, e uma vez por dia: é
+	// DELETE em duas tabelas que podem ser grandes, e no horário de pico isso
+	// competiria com as consultas do painel.
+	podaTask, err := tasks.NewIntegrationPruneTask()
+	if err != nil {
+		log.Fatalf("failed to create integration prune task: %v", err)
+	}
+	if _, err := scheduler.Register("23 4 * * *", podaTask,
+		asynq.Queue(queues.TypeIntegrationPruneQueue)); err != nil {
 		log.Fatal(err)
 	}
 

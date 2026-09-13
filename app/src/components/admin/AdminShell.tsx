@@ -1,6 +1,6 @@
 import React from "react";
 import { Link, useLocation } from "react-router-dom";
-import { ArrowLeft, BarChart3, Download, KeyRound, Server, Users } from "lucide-react";
+import { ArrowLeft, BarChart3, Download, KeyRound, Plug, Server, Users } from "lucide-react";
 import { UserMenu } from "../user/UserMenu";
 import { useAuth } from "../../hooks/useAuth";
 
@@ -12,6 +12,9 @@ const ABAS = [
   // deixou de ser "YouTube" porque as contas agora cobrem várias plataformas.
   { to: "/admin/youtube/accounts", rotulo: "Contas", icone: KeyRound, exato: false },
   { to: "/admin/providers", rotulo: "Providers", icone: Server, exato: false },
+  // Integrações são contas de SISTEMA, não de pessoa — por isso aba própria, e
+  // não uma aparição na tela de usuários.
+  { to: "/admin/integrations", rotulo: "Integrações", icone: Plug, exato: false },
 ];
 
 interface Props {
